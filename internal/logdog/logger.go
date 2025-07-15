@@ -54,8 +54,9 @@ func (l *Logger) log(level LogLevel, message string, data map[string]interface{}
 	Data:      data,
 	}
 
-	// Get today's log file
-	filename := fmt.Sprintf("logdog-%s.json", time.Now().Format("2006-01-02"))
+	// Get today's log file with new format: projectname-logdog-MM-DD-YYYY.json
+	projectName := filepath.Base(l.logDir)
+	filename := fmt.Sprintf("%s-logdog-%s.json", projectName, time.Now().Format("01-02-2006"))
 	filepath := filepath.Join(l.logDir, filename)
 
 	// Ensure directory exists

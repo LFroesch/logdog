@@ -179,7 +179,7 @@ logdog.Info("User action",
 
 ## Log Output
 
-Logs are written as JSON to ` + "`~/logdog/<project-name>/logdog-YYYY-MM-DD.json`" + `:
+Logs are written as JSON to ` + "`~/logdog/<project-name>/<project-name>-logdog-MM-DD-YYYY.json`" + `:
 
 ` + "```json" + `
 {
@@ -206,7 +206,7 @@ your-project/
 
 ~/logdog/
 └── your-project/
-    └── logdog-2024-01-15.json
+    └── your-project-logdog-01-15-2024.json
 ` + "```" + `
 
 ## Best Practices
@@ -325,8 +325,9 @@ func (l *Logger) log(level LogLevel, message string, data map[string]interface{}
 	Data:      data,
 	}
 
-	// Get today's log file
-	filename := fmt.Sprintf("logdog-%s.json", time.Now().Format("2006-01-02"))
+	// Get today's log file with new format: projectname-logdog-MM-DD-YYYY.json
+	projectName := filepath.Base(l.logDir)
+	filename := fmt.Sprintf("%s-logdog-%s.json", projectName, time.Now().Format("01-02-2006"))
 	filepath := filepath.Join(l.logDir, filename)
 
 	// Ensure directory exists
