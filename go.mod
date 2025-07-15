@@ -1,5 +1,5 @@
 // go.mod
-module github.com/yourusername/logdog
+module github.com/LFroesch/logdog
 
 go 1.21
 

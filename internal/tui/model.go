@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/LFroesch/logdog/internal/detector"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/yourusername/logdog/internal/detector"
 )
 
 type screen int
