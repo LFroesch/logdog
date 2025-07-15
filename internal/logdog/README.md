@@ -50,7 +50,7 @@ logdog.Info("User action",
 
 ## Log Output
 
-Logs are written as JSON to `~/logdog/<project-name>/logdog-YYYY-MM-DD.json`:
+Logs are written as JSON to `~/logdog/<project-name>/<project-name>-logdog-MM-DD-YYYY.json`:
 
 ```json
 {
@@ -77,7 +77,7 @@ your-project/
 
 ~/logdog/
 └── your-project/
-    └── logdog-2024-01-15.json
+    └── your-project-logdog-01-15-2024.json
 ```
 
 ## Best Practices
