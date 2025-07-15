@@ -3,6 +3,7 @@ package detector
 import (
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"text/template"
 )
@@ -22,12 +23,21 @@ func (g *GoLanguage) Detect(projectPath string) bool {
 func (g *GoLanguage) Install(projectPath string, config Config) error {
 	fmt.Printf("DEBUG: Installing in %s\n", projectPath)
 
-	// Create logdog directory structure
-	logdogDir := filepath.Join(projectPath, "logdog")
-	logsDir := filepath.Join(logdogDir, "logs")
+	// Get user home directory
+	usr, err := user.Current()
+	if err != nil {
+		return fmt.Errorf("failed to get user home directory: %w", err)
+	}
 
-	fmt.Printf("DEBUG: Creating %s\n", logsDir)
-	if err := os.MkdirAll(logsDir, 0755); err != nil {
+	// Get project name from path
+	projectName := filepath.Base(projectPath)
+	
+	// Create ~/logdog/<project-name> directory structure
+	homeLogdogDir := filepath.Join(usr.HomeDir, "logdog")
+	projectLogDir := filepath.Join(homeLogdogDir, projectName)
+
+	fmt.Printf("DEBUG: Creating %s\n", projectLogDir)
+	if err := os.MkdirAll(projectLogDir, 0755); err != nil {
 		return fmt.Errorf("failed to create logs directory: %w", err)
 	}
 
@@ -38,10 +48,15 @@ func (g *GoLanguage) Install(projectPath string, config Config) error {
 		return fmt.Errorf("failed to create internal directory: %w", err)
 	}
 
-	// Generate logger.go
+	// Generate logger.go with new log directory
 	loggerPath := filepath.Join(internalDir, "logger.go")
 	fmt.Printf("DEBUG: Generating %s\n", loggerPath)
-	if err := g.generateLogger(loggerPath, config); err != nil {
+	
+	// Update config to use the new log directory
+	updatedConfig := config
+	updatedConfig.OutputDir = projectLogDir
+	
+	if err := g.generateLogger(loggerPath, updatedConfig); err != nil {
 		return fmt.Errorf("failed to generate logger: %w", err)
 	}
 
@@ -68,7 +83,17 @@ func (g *GoLanguage) generateReadme(outputPath string) error {
 }
 
 func (g *GoLanguage) GetLogPaths(projectPath string) []string {
-	logsDir := filepath.Join(projectPath, "logdog", "logs")
+	// Get user home directory
+	usr, err := user.Current()
+	if err != nil {
+		return []string{}
+	}
+
+	// Get project name from path
+	projectName := filepath.Base(projectPath)
+	
+	// Look in ~/logdog/<project-name>/
+	logsDir := filepath.Join(usr.HomeDir, "logdog", projectName)
 	var paths []string
 
 	filepath.Walk(logsDir, func(path string, info os.FileInfo, err error) error {
@@ -154,7 +179,7 @@ logdog.Info("User action",
 
 ## Log Output
 
-Logs are written as JSON to ` + "`logdog/logs/logdog-YYYY-MM-DD.json`" + `:
+Logs are written as JSON to ` + "`~/logdog/<project-name>/logdog-YYYY-MM-DD.json`" + `:
 
 ` + "```json" + `
 {
@@ -177,10 +202,11 @@ your-project/
 ├── internal/logdog/
 │   ├── logger.go          # Generated logging package
 │   └── README.md          # This documentation
-├── logdog/
-│   └── logs/
-│       └── logdog-2024-01-15.json
 └── go.mod
+
+~/logdog/
+└── your-project/
+    └── logdog-2024-01-15.json
 ` + "```" + `
 
 ## Best Practices
@@ -283,7 +309,7 @@ func init() {
 	once.Do(func() {
 		defaultLogger = &Logger{
 			logLevel: INFO,
-			logDir:   "logdog/logs",
+			logDir:   "{{.Config.OutputDir}}",
 		}
 	})
 }
