@@ -3,3 +3,5 @@ build:
 
 cp:
 	cp logdog ~/.local/bin/
+
+install: build cp
