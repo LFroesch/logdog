@@ -16,8 +16,7 @@ Logdog is a terminal-based app that:
 ```bash
 git clone <your-repo>/logdog
 cd logdog
-go build -o logdog cmd/main.go
-mv logdog ~/bin/logdog  # or add to your PATH
+make install  # builds and installs to ~/.local/bin/
 ```
 
 2. Use in any Go project:
@@ -112,12 +111,30 @@ your-project/
 └── go.mod
 ```
 
+Global logs are stored in:
+```
+~/logdog/
+└── your-project-name/
+    └── logdog-2024-01-15.json
+```
+
 ## TUI Features
 
 - **🔍 Auto-detection** of Go projects
 - **📦 One-click installation** of logging package  
-- **📋 Log file browser** to view existing logs
-- **⚙️ Settings** for future configuration options
+- **📋 Local log file browser** to view project-specific logs
+- **🌐 Global log viewer** to view logs from all projects
+- **⚙️ Settings** for log retention configuration
+- **🗑️ Log management** with delete and cleanup options
+
+### Navigation & Controls
+- Use **arrow keys** or **j/k** to navigate
+- Press **Enter** to select options
+- Press **v** to view log contents in the log browser
+- Press **d** to delete individual log files
+- Press **c** to clear old logs based on retention settings
+- Press **+/-** to adjust retention days in settings
+- Press **ESC** to go back or return to main menu
 
 ## Best Practices
 
@@ -174,14 +191,21 @@ for _, email := range emails {
 logdog.Info("Job completed", "job_type", "email_sender", "sent", sentCount, "failed", failedCount)
 ```
 
+## Recent Updates
+
+- ✅ Global log viewing across all projects
+- ✅ Settings page with configurable log retention
+- ✅ Log management with delete and cleanup features
+- ✅ Improved file structure with global log storage
+
 ## Contributing
 
 Logdog is designed to be simple and focused. Current roadmap:
 - [ ] Python project support
 - [ ] Node.js project support  
 - [ ] Log filtering/search in TUI
-- [ ] Configuration options
-- [ ] Log rotation settings
+- [ ] Export logs to different formats
+- [ ] Advanced log rotation settings
 
 ## License
 
