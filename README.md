@@ -12,17 +12,13 @@ Logdog is a terminal-based app that:
 
 ## Installation
 
-1. Clone and build logdog:
 ```bash
-git clone <your-repo>/logdog
-cd logdog
-make install  # builds and installs to ~/.local/bin/
+go install github.com/LFroesch/logdog@latest
 ```
 
-2. Use in any Go project:
+Make sure `$GOPATH/bin` (usually `~/go/bin`) is in your PATH:
 ```bash
-cd /path/to/your/go/project
-logdog
+export PATH="$HOME/go/bin:$PATH"
 ```
 
 ## Quick Start
