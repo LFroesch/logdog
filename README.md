@@ -1,208 +1,113 @@
-# 🐕 Logdog
+# Logdog
 
-A TUI-based logging utility that makes structured logging simple and consistent across Go projects.
+TUI logging utility for Go projects. Detects your project, generates a structured JSON logging package, and provides a log viewer. Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
-## What is Logdog?
-
-Logdog is a terminal-based app that:
-- **Detects** Go projects automatically
-- **Generates** a logging package for your project
-- **Creates** structured JSON logs with daily rotation
-- **Provides** a user-friendly API for logging
-
-## Installation
+## Install
 
 ```bash
 go install github.com/LFroesch/logdog@latest
 ```
 
-Make sure `$GOPATH/bin` (usually `~/go/bin`) is in your PATH:
+Or build from source:
+
 ```bash
-export PATH="$HOME/go/bin:$PATH"
+make install
 ```
 
-## Quick Start
+## Usage
 
-1. **Navigate to your Go project** (must have `go.mod`)
-2. **Run `logdog`** to open the TUI
-3. **Press Enter** on "Install/Setup Logger"
-4. **Start logging** in your code:
+```bash
+cd your-go-project
+logdog
+```
+
+### Quick Start
+
+1. Run `logdog` in a Go project (must have `go.mod`)
+2. Select "Install/Setup Logger"
+3. Use the generated logger in your code:
 
 ```go
 import "your-project/internal/logdog"
 
 func main() {
-    // Simple message
     logdog.Info("Application started")
-    
-    // With additional data
     logdog.Info("User logged in", "user_id", 123, "username", "john")
-    
-    // Error with context
     logdog.Error("Database error", "table", "users", "operation", "insert")
 }
 ```
 
-## API Reference
+## Generated API
 
-### Basic Logging
 ```go
-logdog.Debug("Debug message")
-logdog.Info("Info message") 
-logdog.Warn("Warning message")
-logdog.Error("Error message")
-```
+// Basic levels
+logdog.Debug("message")
+logdog.Info("message")
+logdog.Warn("message")
+logdog.Error("message")
 
-### With Additional Data
-```go
-// Pass key-value pairs as arguments
-logdog.Info("User action", 
-    "user_id", 123,
-    "action", "login",
-    "ip", "192.168.1.1")
-```
+// With key-value data
+logdog.Info("request", "method", "GET", "path", "/api/users")
 
-### Convenience Functions
-```go
-// Error with Go error
-logdog.ErrorWithErr("Operation failed", err)
-logdog.ErrorWithErr("DB error", err, "table", "users")
+// With Go error
+logdog.ErrorWithErr("operation failed", err)
 
-// User-specific logging
-logdog.InfoWithUser("Profile updated", userID)
-logdog.InfoWithUser("Purchase made", userID, "amount", 99.99)
-
-// Combined user + error
-logdog.ErrorWithUser("Payment failed", userID, err, "amount", 149.99)
+// With user context
+logdog.InfoWithUser("profile updated", userID)
+logdog.ErrorWithUser("payment failed", userID, err, "amount", 149.99)
 ```
 
 ## Log Output
 
-Logs are written as JSON to `logdog/logs/logdog-YYYY-MM-DD.json`:
+JSON logs at `logdog/logs/logdog-YYYY-MM-DD.json`, rotated daily:
 
 ```json
 {
-  "timestamp": "2024-01-15T14:30:45Z",
+  "timestamp": "2026-01-15T14:30:45Z",
   "level": "INFO",
   "message": "User logged in",
   "data": {
     "user_id": 123,
-    "username": "john",
-    "ip": "192.168.1.1"
+    "username": "john"
   }
 }
 ```
 
-## File Structure
+## TUI Features
 
-After installation, your project will have:
+| Screen | What it does |
+|--------|-------------|
+| Install/Setup | Generate logger package into your project |
+| Local Logs | Browse project-specific log files |
+| Global Logs | Browse logs from all projects (`~/logdog/`) |
+| Settings | Configure log retention days |
+
+### Keybindings
+
+| Key | Action |
+|-----|--------|
+| `j/k`, `up/down` | Navigate |
+| `enter` | Select / open |
+| `v` | View log contents |
+| `d` | Delete log file |
+| `c` | Clean old logs (retention-based) |
+| `+/-` | Adjust retention days |
+| `esc` | Back |
+| `q` | Quit |
+
+## File Structure (after install)
+
 ```
 your-project/
 ├── internal/logdog/
 │   ├── logger.go          # Generated logging package
-│   └── README.md          # This documentation
-├── logdog/
-│   └── logs/
-│       └── logdog-2024-01-15.json
+│   └── README.md
+├── logdog/logs/            # Project-local logs
 └── go.mod
 ```
 
-Global logs are stored in:
-```
-~/logdog/
-└── your-project-name/
-    └── logdog-2024-01-15.json
-```
-
-## TUI Features
-
-- **🔍 Auto-detection** of Go projects
-- **📦 One-click installation** of logging package  
-- **📋 Local log file browser** to view project-specific logs
-- **🌐 Global log viewer** to view logs from all projects
-- **⚙️ Settings** for log retention configuration
-- **🗑️ Log management** with delete and cleanup options
-
-### Navigation & Controls
-- Use **arrow keys** or **j/k** to navigate
-- Press **Enter** to select options
-- Press **v** to view log contents in the log browser
-- Press **d** to delete individual log files
-- Press **c** to clear old logs based on retention settings
-- Press **+/-** to adjust retention days in settings
-- Press **ESC** to go back or return to main menu
-
-## Best Practices
-
-1. **Use descriptive messages**: `"User authentication failed"` not `"Error"`
-2. **Include relevant context**: Always add user IDs, request IDs, etc.
-3. **Use appropriate log levels**: 
-   - `Debug`: Development/troubleshooting info
-   - `Info`: Normal application events
-   - `Warn`: Unusual but handled situations
-   - `Error`: Actual problems that need attention
-4. **Be consistent**: Use the same field names across your app (`user_id`, not `userId` sometimes and `user_id` other times)
-
-## Examples
-
-### Web Server Logging
-```go
-// Request logging
-logdog.Info("HTTP request", 
-    "method", r.Method,
-    "path", r.URL.Path,
-    "user_id", userID,
-    "ip", r.RemoteAddr)
-
-// Error handling
-if err != nil {
-    logdog.ErrorWithUser("Database query failed", userID, err,
-        "query", "SELECT * FROM users",
-        "table", "users")
-    return
-}
-
-// Business events
-logdog.InfoWithUser("Order created", userID,
-    "order_id", order.ID,
-    "total", order.Total,
-    "items_count", len(order.Items))
-```
-
-### Background Jobs
-```go
-logdog.Info("Job started", "job_type", "email_sender", "batch_size", 100)
-
-for _, email := range emails {
-    if err := sendEmail(email); err != nil {
-        logdog.Error("Email send failed", 
-            "recipient", email.To,
-            "template", email.Template,
-            "error", err.Error())
-        continue
-    }
-    logdog.Debug("Email sent", "recipient", email.To)
-}
-
-logdog.Info("Job completed", "job_type", "email_sender", "sent", sentCount, "failed", failedCount)
-```
-
-## Recent Updates
-
-- ✅ Global log viewing across all projects
-- ✅ Settings page with configurable log retention
-- ✅ Log management with delete and cleanup features
-- ✅ Improved file structure with global log storage
-
-## Contributing
-
-Logdog is designed to be simple and focused. Current roadmap:
-- [ ] Python project support
-- [ ] Node.js project support  
-- [ ] Log filtering/search in TUI
-- [ ] Export logs to different formats
-- [ ] Advanced log rotation settings
+Global logs: `~/logdog/<project-name>/`
 
 ## License
 
-[Your License Here]
+[AGPL-3.0](LICENSE)
