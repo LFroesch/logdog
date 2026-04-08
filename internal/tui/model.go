@@ -65,6 +65,8 @@ type Model struct {
 
 	// settings
 	retentionDays int
+
+	showHelp bool
 }
 
 // tickMsg drives live tail in the future

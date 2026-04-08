@@ -30,6 +30,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
+	// Help overlay
+	if m.showHelp {
+		if key == "?" || key == "q" || key == "esc" {
+			m.showHelp = false
+		}
+		return m, nil
+	}
+
 	// Search input mode (log viewer)
 	if m.searching {
 		return m.handleSearchInput(key)
@@ -98,6 +106,9 @@ func (m Model) handleLogViewKey(key string) (tea.Model, tea.Cmd) {
 			e := entries[m.logScroll]
 			m.detailEntry = &e
 		}
+	case "?":
+		m.showHelp = true
+		return m, nil
 	case "/":
 		m.searching = true
 	case "e":
@@ -127,6 +138,9 @@ func (m *Model) toggleLevelFilter(level string) {
 
 func (m Model) handleNavKey(key string) (tea.Model, tea.Cmd) {
 	switch key {
+	case "?":
+		m.showHelp = true
+		return m, nil
 	case "q":
 		if m.screen == screenMain {
 			return m, tea.Quit

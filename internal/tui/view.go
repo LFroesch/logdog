@@ -17,6 +17,9 @@ func (m Model) View() string {
 	if m.width == 0 {
 		return "loading..."
 	}
+	if m.showHelp {
+		return m.renderHelp()
+	}
 
 	header := m.renderHeader()
 	footer := m.renderFooter()
@@ -437,4 +440,37 @@ func cutAnsi(s string, start, _ int) string {
 		w += rw
 	}
 	return ""
+}
+
+func (m Model) renderHelp() string {
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colorPurple).
+		Padding(1, 2).
+		Width(m.width - 4)
+
+	keys := []struct{ key, desc string }{
+		{"j/k, ↑/↓", "Navigate"},
+		{"enter/v", "Open log viewer"},
+		{"e/w/i/d", "Filter by level (ERROR/WARN/INFO/DEBUG)"},
+		{"c", "Clear filters"},
+		{"/", "Search"},
+		{"esc/q", "Back / quit"},
+		{"?", "Toggle this help"},
+		{"ctrl+c", "Quit immediately"},
+	}
+
+	var lines []string
+	lines = append(lines, styleTitle.Render("logdog — Help"))
+	lines = append(lines, "")
+	for _, k := range keys {
+		lines = append(lines, fmt.Sprintf("  %-22s %s",
+			styleBold.Render(k.key), k.desc))
+	}
+	lines = append(lines, "")
+	lines = append(lines, styleDim.Render("Press ?, q, or esc to close"))
+
+	return lipgloss.Place(m.width, m.height,
+		lipgloss.Center, lipgloss.Center,
+		box.Render(strings.Join(lines, "\n")))
 }
