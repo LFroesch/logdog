@@ -29,11 +29,6 @@ make install
 Command:
 
 ```bash
-logdog
-```
-## Usage
-
-```bash
 cd your-go-project
 logdog
 ```
