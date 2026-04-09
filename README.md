@@ -31,18 +31,6 @@ Command:
 ```bash
 logdog
 ```
-## Install
-
-```bash
-go install github.com/LFroesch/logdog@latest
-```
-
-Or build from source:
-
-```bash
-make install
-```
-
 ## Usage
 
 ```bash
