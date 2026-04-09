@@ -118,7 +118,7 @@ your-project/
 └── go.mod
 ```
 
-Global logs: `~/logdog/<project-name>/`
+Global logs default to `~/.local/share/logdog/`. Override with `LOGDOG_DIR` env var.
 
 ## License
 
