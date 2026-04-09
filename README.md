@@ -2,6 +2,33 @@
 
 TUI logging utility for Go projects. Detects your project, generates a structured JSON logging package, and provides a log viewer. Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
+## Quick Install
+
+Recommended (installs to `~/.local/bin`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LFroesch/logdog/main/install.sh | bash
+```
+
+Or download a binary from [GitHub Releases](https://github.com/LFroesch/logdog/releases).
+
+Or install with Go:
+
+```bash
+go install github.com/LFroesch/logdog@latest
+```
+
+Or build from source:
+
+```bash
+make install
+```
+
+Command:
+
+```bash
+logdog
+```
 ## Install
 
 ```bash

@@ -1,7 +1,12 @@
+BIN := logdog
+BUILD_TARGET := ./cmd
+INSTALL_DIR ?= $(HOME)/.local/bin
+
 build:
-	go build -o logdog cmd/main.go
+	go build -o $(BIN) $(BUILD_TARGET)
 
-cp:
-	cp logdog ~/.local/bin/
+install: build
+	mkdir -p $(INSTALL_DIR)
+	install -m 0755 $(BIN) $(INSTALL_DIR)/$(BIN)
 
-install: build cp
+.PHONY: build install
