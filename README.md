@@ -1,124 +1,176 @@
 # Logdog
 
-TUI logging utility for Go projects. Detects your project, generates a structured JSON logging package, and provides a log viewer. Built with Go and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+Logging control plane for `tui-suite`. `logdog` auto-discovers logs from the directory you launch it in, lets you add more roots in config, gives you a dashboard/setup/cleanup TUI, and keeps a real CLI for `files`, `cat`, `grep`, `tail`, and `prune`.
 
-## Quick Install
+Built with Go, Cobra, and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+
+## Install
 
 Supported platforms: Linux and macOS. On Windows, use WSL.
 
-Recommended (installs to `~/.local/bin`):
+Recommended one-liner:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LFroesch/logdog/main/install.sh | bash
 ```
 
-Or download a binary from [GitHub Releases](https://github.com/LFroesch/logdog/releases).
-
-Or install with Go:
+Install from Go:
 
 ```bash
 go install github.com/LFroesch/logdog@latest
 ```
 
-Or build from source:
+Verify:
 
 ```bash
-make install
+logdog status
 ```
 
-Command:
+If `logdog` is not on your `PATH`, add the install dir printed by `install.sh` to your shell config.
 
-```bash
-cd your-go-project
-logdog
-```
+## What It Does
 
-### Quick Start
+- **Discover logs automatically** from the current directory, recursively
+- **Scan additional roots** from `~/.config/logdog/logdog-config.json`
+- **View structured and plain logs** in a 2-panel dashboard with entry navigation that keeps the selected result visible
+- **Bootstrap logging** into Go projects with `logdog install`
+- **Clean up old logs** including rotated/compressed variants and empty log dirs
+- **Work from the CLI** for scripting and pipelines
 
-1. Run `logdog` in a Go project (must have `go.mod`)
-2. Select "Install/Setup Logger"
-3. Use the generated logger in your code:
+## TUI
 
-```go
-import "your-project/internal/logdog"
-
-func main() {
-    logdog.Info("Application started")
-    logdog.Info("User logged in", "user_id", 123, "username", "john")
-    logdog.Error("Database error", "table", "users", "operation", "insert")
-}
-```
-
-## Generated API
-
-```go
-// Basic levels
-logdog.Debug("message")
-logdog.Info("message")
-logdog.Warn("message")
-logdog.Error("message")
-
-// With key-value data
-logdog.Info("request", "method", "GET", "path", "/api/users")
-
-// With Go error
-logdog.ErrorWithErr("operation failed", err)
-
-// With user context
-logdog.InfoWithUser("profile updated", userID)
-logdog.ErrorWithUser("payment failed", userID, err, "amount", 149.99)
-```
-
-## Log Output
-
-JSON logs at `logdog/logs/logdog-YYYY-MM-DD.json`, rotated daily:
-
-```json
-{
-  "timestamp": "2026-01-15T14:30:45Z",
-  "level": "INFO",
-  "message": "User logged in",
-  "data": {
-    "user_id": 123,
-    "username": "john"
-  }
-}
-```
-
-## TUI Features
-
-| Screen | What it does |
-|--------|-------------|
-| Install/Setup | Generate logger package into your project |
-| Local Logs | Browse project-specific log files |
-| Global Logs | Browse logs from all projects (`~/logdog/`) |
-| Settings | Configure log retention days |
+| Page | Purpose |
+|------|---------|
+| Dashboard | Left pane shows discovered logs with source root labels, right pane shows metadata, parsed entries, and entry detail |
+| Setup | Install the Go logger, inspect config, add/remove discovery roots, and copy usage snippets |
+| Cleanup | Review log cleanup candidates and prune/delete safely |
 
 ### Keybindings
 
 | Key | Action |
 |-----|--------|
-| `j/k`, `up/down` | Navigate |
-| `enter` | Select / open |
-| `v` | View log contents |
-| `d` | Delete log file |
-| `c` | Clean old logs (retention-based) |
-| `+/-` | Adjust retention days |
-| `esc` | Back |
-| `q` | Quit |
+| `1/2/3` | Dashboard / Setup / Cleanup |
+| `tab`, `shift+tab` | Switch focused panel |
+| `j/k`, `up/down` | Move selection |
+| `g/G` | Jump to top / bottom |
+| `ctrl+u`, `ctrl+d` | Page through long lists |
+| `/` | Search within the selected log |
+| `l` | Cycle level filter |
+| `t` | Toggle live follow |
+| `enter` | Focus viewer or open the selected file/root |
+| `o` | Open selected file or config in editor |
+| `a`, `A` | Add project root or parent root from Setup |
+| `d` | Remove selected configured root from Setup |
+| `r` | Reload discovery/config |
+| `?` | Help |
+| `q` | Quit or return to Dashboard |
 
-## File Structure (after install)
+## Config
 
+`~/.config/logdog/logdog-config.json` is created automatically.
+
+Current working directory scanning is always enabled. Config adds more roots and tuning knobs:
+
+```json
+{
+  "roots": [
+    "~/.local/share/logdog"
+  ],
+  "ignore_patterns": [".git", "node_modules", "vendor", "dist", "build", ".next", "coverage"],
+  "extensions": [".log", ".txt", ".out", ".json", ".jsonl", ".ndjson"],
+  "max_file_bytes": 52428800,
+  "max_preview_lines": 5000,
+  "cleanup_keep_days": 14,
+  "default_level_filter": ""
+}
 ```
+
+## CLI
+
+The TUI is the default when run in a terminal:
+
+```bash
+logdog
+```
+
+Core commands:
+
+```bash
+logdog status
+logdog files
+logdog cat
+logdog cat /var/log/system.log
+logdog grep error
+logdog tail /tmp/app.jsonl
+logdog prune --days 7
+logdog config
+logdog config add-root ~/src
+logdog config remove-root ~/.local/share/logdog
+tail -f app.jsonl | logdog --level error --search timeout
+```
+
+Examples:
+
+```bash
+# inspect the newest discovered log
+logdog cat
+
+# search every discovered file for a term
+logdog grep websocket
+
+# follow the latest file and only show errors
+logdog tail --level error
+
+# print the current config JSON and paths
+logdog config
+```
+
+## Go Logger Install
+
+Inside a Go project:
+
+```bash
+logdog install
+```
+
+This generates:
+
+```text
 your-project/
 ├── internal/logdog/
-│   ├── logger.go          # Generated logging package
+│   ├── logger.go
 │   └── README.md
-├── logdog/logs/            # Project-local logs
-└── go.mod
 ```
 
-Global logs default to `~/.local/share/logdog/`. Override with `LOGDOG_DIR` env var.
+Generated logs are written as **JSON Lines** to:
+
+```text
+~/.local/share/logdog/<project>/logs/<project>-YYYY-MM-DD.jsonl
+```
+
+Usage:
+
+```go
+import "your-project/internal/logdog"
+
+func main() {
+    logdog.Info("server started", "port", 8080)
+    logdog.Warn("slow query", "sql", "select * from users")
+    logdog.Error("request failed", "path", "/api/users", "status", 500)
+}
+```
+
+## Workflow
+
+Typical loop:
+
+```bash
+logdog
+# 1. browse recent files on Dashboard
+# 2. press / to filter the current file
+# 3. press 2 for Setup if you need more roots or logger install
+# 4. use logdog grep / tail / cat for shell workflows
+```
 
 ## License
 

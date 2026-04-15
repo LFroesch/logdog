@@ -1,378 +1,465 @@
 package tui
 
 import (
-	"fmt"
-	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/LFroesch/logdog/internal/logs"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		return m, nil
-
+	case tickMsg:
+		if m.statusMsg != "" && time.Now().After(m.statusExpiry) {
+			m.statusMsg = ""
+		}
+		if m.tailing && m.page == pageDashboard {
+			m.reloadEntriesOnly()
+		}
+	case editorDoneMsg:
+		if msg.err != nil {
+			m.showStatus("editor failed: " + msg.err.Error())
+		} else {
+			m.showStatus("editor closed")
+			m.reloadConfig()
+			m.reloadAll()
+		}
+	case copyDoneMsg:
+		if msg.err != nil {
+			m.showStatus("copy failed: " + msg.err.Error())
+		} else {
+			m.showStatus("copied " + msg.label)
+		}
+	case tea.MouseMsg:
+		if m.mode != modeNormal {
+			return m, m.nextTickCmd()
+		}
+		next, nextCmd := m.updateMouse(msg)
+		m = next.(Model)
+		cmd = nextCmd
+		return m, batchCmds(cmd, m.nextTickCmd())
 	case tea.KeyMsg:
-		return m.handleKey(msg)
+		if msg.String() == "ctrl+c" {
+			return m, tea.Quit
+		}
+		switch m.mode {
+		case modeHelp:
+			switch msg.String() {
+			case "?", "q", "esc":
+				m.mode = modeNormal
+				m.helpScroll = 0
+			case "j", "down":
+				m.helpScroll++
+			case "k", "up":
+				if m.helpScroll > 0 {
+					m.helpScroll--
+				}
+			case "g":
+				m.helpScroll = 0
+			case "G":
+				m.helpScroll = 9999
+			case "ctrl+d", "pgdown":
+				m.helpScroll += max(1, m.contentHeight()/3)
+			case "ctrl+u", "pgup":
+				m.helpScroll -= max(1, m.contentHeight()/3)
+				if m.helpScroll < 0 {
+					m.helpScroll = 0
+				}
+			}
+			return m, m.nextTickCmd()
+		case modeSearch:
+			next, nextCmd := m.updateSearch(msg)
+			m = next.(Model)
+			cmd = nextCmd
+			return m, batchCmds(cmd, m.nextTickCmd())
+		case modeInput:
+			next, nextCmd := m.updateInput(msg)
+			m = next.(Model)
+			cmd = nextCmd
+			return m, batchCmds(cmd, m.nextTickCmd())
+		}
+		next, nextCmd := m.updateNormal(msg)
+		m = next.(Model)
+		cmd = nextCmd
+		return m, batchCmds(cmd, m.nextTickCmd())
 	}
-	return m, nil
+	return m, m.nextTickCmd()
 }
 
-func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
-	// Global quit
-	if key == "ctrl+c" {
-		return m, tea.Quit
-	}
-
-	// Help overlay
-	if m.showHelp {
-		if key == "?" || key == "q" || key == "esc" {
-			m.showHelp = false
-		}
-		return m, nil
-	}
-
-	// Search input mode (log viewer)
-	if m.searching {
-		return m.handleSearchInput(key)
-	}
-
-	switch m.screen {
-	case screenLogView:
-		return m.handleLogViewKey(key)
-	default:
-		return m.handleNavKey(key)
-	}
-}
-
-func (m Model) handleSearchInput(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "esc":
-		m.searching = false
-		m.searchQuery = ""
-		m.logScroll = 0
-	case "enter":
-		m.searching = false
-		m.logScroll = 0
-	case "backspace":
-		if len(m.searchQuery) > 0 {
-			m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
-			m.logScroll = 0
-		}
-	default:
-		if len(key) == 1 {
-			m.searchQuery += key
-			m.logScroll = 0
-		}
-	}
-	return m, nil
-}
-
-func (m Model) handleLogViewKey(key string) (tea.Model, tea.Cmd) {
-	// detail overlay
-	if m.detailEntry != nil {
-		if key == "esc" || key == "q" || key == "enter" {
-			m.detailEntry = nil
-		}
-		return m, nil
-	}
-
-	switch key {
+func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
 	case "q":
-		return m, tea.Quit
-	case "esc":
-		m.screen = screenLogs
-		m.logEntries = nil
-		m.logScroll = 0
-		m.levelFilter = ""
-		m.searchQuery = ""
-		m.searching = false
-	case "up", "k":
-		if m.logScroll > 0 {
-			m.logScroll--
+		if m.page == pageDashboard {
+			return m, tea.Quit
 		}
-	case "down", "j":
-		m.logScroll++
-	case "enter":
-		// show detail for current visible entry
-		entries := m.filteredEntries()
-		if m.logScroll < len(entries) {
-			e := entries[m.logScroll]
-			m.detailEntry = &e
-		}
+		m.page = pageDashboard
+		m.focus = focusFiles
+		return m, nil
 	case "?":
-		m.showHelp = true
+		m.mode = modeHelp
+		return m, nil
+	case "1":
+		m.page = pageDashboard
+		m.focus = focusFiles
+		return m, nil
+	case "2":
+		m.page = pageSetup
+		m.focus = focusSetupRoots
+		return m, nil
+	case "3":
+		m.page = pageCleanup
+		m.focus = focusCleanupList
+		return m, nil
+	case "tab":
+		m.focus = m.nextFocus()
+		return m, nil
+	case "shift+tab":
+		m.focus = m.prevFocus()
 		return m, nil
 	case "/":
-		m.searching = true
-	case "e":
-		m.toggleLevelFilter("ERROR")
-	case "w":
-		m.toggleLevelFilter("WARN")
-	case "i":
-		m.toggleLevelFilter("INFO")
-	case "d":
-		m.toggleLevelFilter("DEBUG")
-	case "c":
-		m.levelFilter = ""
-		m.searchQuery = ""
-		m.logScroll = 0
-	}
-	return m, nil
-}
-
-func (m *Model) toggleLevelFilter(level string) {
-	if m.levelFilter == level {
-		m.levelFilter = ""
-	} else {
-		m.levelFilter = level
-	}
-	m.logScroll = 0
-}
-
-func (m Model) handleNavKey(key string) (tea.Model, tea.Cmd) {
-	switch key {
-	case "?":
-		m.showHelp = true
+		if m.page == pageDashboard {
+			m.mode = modeSearch
+			m.searchInput = m.search
+			m.showStatus("search current file and press enter")
+		}
 		return m, nil
-	case "q":
-		if m.screen == screenMain {
-			return m, tea.Quit
+	case "l":
+		if m.page == pageDashboard {
+			m.cycleLevel()
+			m.applyFileFilter()
+			m.reloadEntries()
 		}
-		m.screen = screenMain
-		m.cursor = 0
-		m.message = ""
-
-	case "esc":
-		if m.confirmingDelete || m.confirmingClear {
-			m.confirmingDelete = false
-			m.confirmingClear = false
-			m.message = ""
-			return m, nil
-		}
-		m.screen = screenMain
-		m.cursor = 0
-		m.message = ""
-		m.selectedProject = ""
-
-	case "up", "k":
-		if !m.confirmingDelete && !m.confirmingClear && m.cursor > 0 {
-			m.cursor--
-			m.message = ""
-		}
-
-	case "down", "j":
-		if !m.confirmingDelete && !m.confirmingClear && m.cursor < m.maxCursor() {
-			m.cursor++
-			m.message = ""
-		}
-
-	case "enter":
-		if m.confirmingDelete || m.confirmingClear {
-			return m, nil
-		}
-		return m.handleEnter()
-
-	case "v":
-		if m.screen == screenLogs && len(m.logFiles) > 0 && !m.confirmingDelete && !m.confirmingClear {
-			return m.openLogViewer()
-		}
-
-	case "d":
-		if m.screen == screenLogs && len(m.logFiles) > 0 && !m.confirmingDelete && !m.confirmingClear {
-			filename := filepath.Base(m.logFiles[m.cursor])
-			m.message = fmt.Sprintf("Delete %s? y to confirm, any key to cancel", filename)
-			m.confirmingDelete = true
-			m.deleteFileIndex = m.cursor
-		}
-
-	case "c":
-		if m.screen == screenLogs && !m.confirmingDelete && !m.confirmingClear {
-			return m.startClearOld()
-		}
-
-	case "y":
-		if m.confirmingDelete {
-			return m.confirmDelete()
-		}
-		if m.confirmingClear {
-			return m.confirmClearOld()
-		}
-
-	case "+", "=":
-		if m.screen == screenSettings && m.retentionDays < 365 {
-			m.retentionDays++
-			m.message = fmt.Sprintf("Retention: %d days", m.retentionDays)
-		}
-
-	case "-", "_":
-		if m.screen == screenSettings && m.retentionDays > 1 {
-			m.retentionDays--
-			m.message = fmt.Sprintf("Retention: %d days", m.retentionDays)
-		}
-
-	default:
-		if m.confirmingDelete || m.confirmingClear {
-			m.confirmingDelete = false
-			m.confirmingClear = false
-			m.message = ""
-		}
-	}
-	return m, nil
-}
-
-func (m Model) handleEnter() (Model, tea.Cmd) {
-	switch m.screen {
-	case screenMain:
-		switch m.cursor {
-		case 0:
-			m.screen = screenInstall
-		case 1:
-			m.screen = screenLogs
-		case 2:
-			m.screen = screenGlobalProjects
-		case 3:
-			m.screen = screenSettings
-		case 4:
-			return m, tea.Quit
-		}
-		m.cursor = 0
-		m.message = ""
-
-	case screenInstall:
-		if m.language != nil {
-			if err := m.language.Install(m.projectPath, m.config); err != nil {
-				m.message = "error: " + err.Error()
+		return m, nil
+	case "t":
+		if m.page == pageDashboard {
+			m.tailing = !m.tailing
+			if m.tailing {
+				m.showStatus("live follow enabled")
 			} else {
-				m.message = "logger installed → internal/logdog/logger.go"
-				m.logFiles = m.language.GetLogPaths(m.projectPath)
-			}
-		} else {
-			m.message = "no supported language detected"
-		}
-		m.screen = screenMain
-		m.cursor = 0
-		return m, tea.ClearScreen
-
-	case screenLogs:
-		return m.openLogViewer()
-
-	case screenGlobalProjects:
-		if m.cursor < len(m.globalProjects) {
-			m.selectedProject = m.globalProjects[m.cursor]
-			m.logFiles = getLogFilesForProject(m.selectedProject)
-			m.screen = screenLogs
-			m.cursor = 0
-		}
-	}
-	return m, nil
-}
-
-func (m Model) openLogViewer() (Model, tea.Cmd) {
-	if m.cursor >= len(m.logFiles) {
-		return m, nil
-	}
-	m.logEntries = readLogEntries(m.logFiles[m.cursor])
-	m.logScroll = 0
-	m.levelFilter = ""
-	m.searchQuery = ""
-	m.searching = false
-	m.detailEntry = nil
-	m.screen = screenLogView
-	return m, nil
-}
-
-func (m Model) startClearOld() (Model, tea.Cmd) {
-	cutoff := time.Now().AddDate(0, 0, -m.retentionDays)
-	count := 0
-	for _, f := range m.logFiles {
-		if info, err := os.Stat(f); err == nil && info.ModTime().Before(cutoff) {
-			count++
-		}
-	}
-	if count == 0 {
-		m.message = fmt.Sprintf("no files older than %d days", m.retentionDays)
-		return m, nil
-	}
-	m.message = fmt.Sprintf("clear %d file(s) older than %d days? y to confirm", count, m.retentionDays)
-	m.confirmingClear = true
-	return m, nil
-}
-
-func (m Model) confirmClearOld() (Model, tea.Cmd) {
-	cutoff := time.Now().AddDate(0, 0, -m.retentionDays)
-	deleted := 0
-	for _, f := range m.logFiles {
-		if info, err := os.Stat(f); err == nil && info.ModTime().Before(cutoff) {
-			if os.Remove(f) == nil {
-				deleted++
+				m.showStatus("live follow disabled")
 			}
 		}
-	}
-	if m.language != nil {
-		m.logFiles = m.language.GetLogPaths(m.projectPath)
-	}
-	if m.cursor >= len(m.logFiles) && len(m.logFiles) > 0 {
-		m.cursor = len(m.logFiles) - 1
-	}
-	m.message = fmt.Sprintf("cleared %d file(s)", deleted)
-	m.confirmingClear = false
-	return m, nil
-}
-
-func (m Model) confirmDelete() (Model, tea.Cmd) {
-	if m.deleteFileIndex >= len(m.logFiles) {
-		m.confirmingDelete = false
+		return m, nil
+	case "r":
+		m.reloadConfig()
+		m.reloadAll()
+		m.showStatus("reloaded")
+		return m, nil
+	case "g":
+		m.moveTop()
+		return m, nil
+	case "G":
+		m.moveBottom()
+		return m, nil
+	case "ctrl+d", "pgdown":
+		m.pageDown()
+		return m, nil
+	case "ctrl+u", "pgup":
+		m.pageUp()
 		return m, nil
 	}
-	f := m.logFiles[m.deleteFileIndex]
-	if err := os.Remove(f); err != nil {
-		m.message = "delete failed: " + err.Error()
-	} else {
-		m.message = "deleted " + filepath.Base(f)
-		if m.language != nil {
-			m.logFiles = m.language.GetLogPaths(m.projectPath)
-		} else {
-			m.logFiles = getLogFilesForProject(m.selectedProject)
-		}
-		if m.cursor >= len(m.logFiles) && len(m.logFiles) > 0 {
-			m.cursor = len(m.logFiles) - 1
-		}
-	}
-	m.confirmingDelete = false
-	return m, nil
-}
 
-func (m Model) maxCursor() int {
-	switch m.screen {
-	case screenMain:
-		return 4
-	case screenLogs:
-		if len(m.logFiles) == 0 {
-			return 0
-		}
-		return len(m.logFiles) - 1
-	case screenGlobalProjects:
-		if len(m.globalProjects) == 0 {
-			return 0
-		}
-		return len(m.globalProjects) - 1
+	switch m.page {
+	case pageDashboard:
+		return m.updateDashboard(msg)
+	case pageSetup:
+		return m.updateSetup(msg)
+	case pageCleanup:
+		return m.updateCleanup(msg)
 	default:
-		return 0
+		return m, nil
 	}
 }
 
-// unused but keep for future live tail
-func (m Model) refreshLogs() (Model, tea.Cmd) {
-	if m.language != nil {
-		m.logFiles = m.language.GetLogPaths(m.projectPath)
+func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeNormal
+		m.searchInput = ""
+	case "enter":
+		m.mode = modeNormal
+		m.search = strings.TrimSpace(m.searchInput)
+		m.fileCursor = 0
+		m.fileScroll = 0
+		m.entryCursor = 0
+		m.entryScroll = 0
+		m.applyFileFilter()
+		m.reloadEntries()
+		if m.search == "" {
+			m.showStatus("search cleared")
+		} else {
+			m.showStatus(strings.Join([]string{"filter:", m.search, "·", intStr(len(m.files)), "files"}, " "))
+		}
+	case "backspace", "ctrl+h":
+		if len(m.searchInput) > 0 {
+			r := []rune(m.searchInput)
+			m.searchInput = string(r[:len(r)-1])
+		}
+	default:
+		if len(msg.Runes) > 0 {
+			m.searchInput += string(msg.Runes)
+		}
 	}
 	return m, nil
 }
 
+func (m Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeNormal
+		m.inputBuf = ""
+	case "enter":
+		path := strings.TrimSpace(m.inputBuf)
+		m.inputBuf = ""
+		m.mode = modeNormal
+		if path != "" {
+			if m.addRoot(path) {
+				m.showStatus("added root: " + path)
+			} else {
+				m.showStatus("root already configured")
+			}
+		}
+	case "backspace", "ctrl+h":
+		if len(m.inputBuf) > 0 {
+			r := []rune(m.inputBuf)
+			m.inputBuf = string(r[:len(r)-1])
+		}
+	default:
+		if len(msg.Runes) > 0 {
+			m.inputBuf += string(msg.Runes)
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateDashboard(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		if m.focus == focusFiles {
+			if m.fileCursor < len(m.files)-1 {
+				m.selectFile(m.fileCursor + 1)
+			}
+		} else if m.focus == focusViewer && m.entryCursor < len(m.entries)-1 {
+			m.entryCursor++
+			m.ensureEntryVisible()
+			m.detailScroll = 0
+		}
+	case "k", "up":
+		if m.focus == focusFiles {
+			if m.fileCursor > 0 {
+				m.selectFile(m.fileCursor - 1)
+			}
+		} else if m.focus == focusViewer && m.entryCursor > 0 {
+			m.entryCursor--
+			m.ensureEntryVisible()
+			m.detailScroll = 0
+		}
+	case "esc":
+		if m.focus == focusViewer {
+			m.focus = focusFiles
+		}
+		return m, nil
+	case "enter":
+		if m.focus == focusFiles {
+			if len(m.files) > 0 {
+				m.focus = focusViewer
+			}
+		} else if m.focus == focusViewer && len(m.files) > 0 {
+			return m, openEditorCmd(m.files[m.fileCursor].Path)
+		}
+	case "o":
+		target := m.configPath
+		if m.focus == focusFiles && len(m.files) > 0 {
+			target = m.files[m.fileCursor].Path
+		}
+		return m, openEditorCmd(target)
+	case "y":
+		if m.focus == focusFiles && len(m.files) > 0 {
+			return m, copyToClipboardCmd(m.files[m.fileCursor].Path, "file path")
+		}
+		if m.focus == focusViewer && len(m.entries) > 0 {
+			return m, copyToClipboardCmd(m.copyEntryPayload(), "entry payload")
+		}
+	case "Y":
+		if m.focus == focusViewer && len(m.entries) > 0 {
+			return m, copyToClipboardCmd(m.entries[m.entryCursor].Raw, "raw entry")
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionPress {
+		return m, nil
+	}
+
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
+		return m.scrollByMouse(msg.X, -1), nil
+	case tea.MouseButtonWheelDown:
+		return m.scrollByMouse(msg.X, 1), nil
+	default:
+		return m, nil
+	}
+}
+
+func (m Model) scrollByMouse(x, delta int) Model {
+	if m.page != pageDashboard {
+		return m
+	}
+
+	if m.dashboardPanelAtX(x) == focusFiles {
+		if delta > 0 && m.fileCursor < len(m.files)-1 {
+			m.selectFile(m.fileCursor + 1)
+		}
+		if delta < 0 && m.fileCursor > 0 {
+			m.selectFile(m.fileCursor - 1)
+		}
+		return m
+	}
+
+	m.focus = focusViewer
+	if delta > 0 && m.entryCursor < len(m.entries)-1 {
+		m.entryCursor++
+		m.ensureEntryVisible()
+		m.detailScroll = 0
+	}
+	if delta < 0 && m.entryCursor > 0 {
+		m.entryCursor--
+		m.ensureEntryVisible()
+		m.detailScroll = 0
+	}
+	return m
+}
+
+func (m Model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		if m.focus == focusSetupRoots && m.rootCursor < len(m.cfg.Roots)-1 {
+			m.rootCursor++
+			m.ensureRootVisible()
+		}
+	case "k", "up":
+		if m.focus == focusSetupRoots && m.rootCursor > 0 {
+			m.rootCursor--
+			m.ensureRootVisible()
+		}
+	case "i":
+		m.installLogger()
+	case "enter":
+		if m.focus == focusSetupRoots && len(m.cfg.Roots) > 0 {
+			return m, openEditorCmd(m.cfg.Roots[m.rootCursor])
+		}
+		return m, nil
+	case "n":
+		m.mode = modeInput
+		m.inputBuf = ""
+		return m, nil
+	case "a":
+		if m.addRoot(m.projectPath) {
+			m.showStatus("added project root to config")
+		} else {
+			m.showStatus("project root already configured")
+		}
+	case "A":
+		parent := filepath.Dir(m.projectPath)
+		if m.addRoot(parent) {
+			m.showStatus("added parent root to config")
+		} else {
+			m.showStatus("parent root already configured")
+		}
+	case "d":
+		if m.focus == focusSetupRoots {
+			if m.removeSelectedRoot() {
+				m.showStatus("removed configured root")
+			} else {
+				m.showStatus("no configured root selected")
+			}
+		}
+	case "o":
+		return m, openEditorCmd(m.configPath)
+	case "y":
+		if m.focus == focusSetupRoots && len(m.cfg.Roots) > 0 {
+			return m, copyToClipboardCmd(m.cfg.Roots[m.rootCursor], "root path")
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateCleanup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "j", "down":
+		if m.cleanupCursor < len(m.cleanup)-1 {
+			m.cleanupCursor++
+			m.ensureCleanupVisible()
+		}
+	case "k", "up":
+		if m.cleanupCursor > 0 {
+			m.cleanupCursor--
+			m.ensureCleanupVisible()
+		}
+	case "space":
+		if len(m.cleanup) > 0 {
+			path := m.cleanup[m.cleanupCursor].Path
+			m.selected[path] = !m.selected[path]
+			if !m.selected[path] {
+				delete(m.selected, path)
+			}
+		}
+	case "x":
+		if len(m.cleanup) == 0 {
+			return m, nil
+		}
+		_, err := logs.DeleteCandidates([]logs.CleanupCandidate{m.cleanup[m.cleanupCursor]})
+		if err != nil {
+			m.showStatus("delete failed: " + err.Error())
+			return m, nil
+		}
+		m.reloadCleanup()
+		m.showStatus("deleted candidate")
+	case "D":
+		var batch []logs.CleanupCandidate
+		for _, candidate := range m.cleanup {
+			if m.selected[candidate.Path] {
+				batch = append(batch, candidate)
+			}
+		}
+		if len(batch) == 0 {
+			m.showStatus("nothing selected")
+			return m, nil
+		}
+		deleted, err := logs.DeleteCandidates(batch)
+		if err != nil {
+			m.showStatus("delete failed: " + err.Error())
+			return m, nil
+		}
+		m.selected = map[string]bool{}
+		m.reloadCleanup()
+		m.showStatus(strings.Join([]string{"deleted", intStr(deleted), "candidates"}, " "))
+	case "X":
+		deleted, err := m.store.PruneOlderThan(m.cfg.CleanupKeepDays)
+		if err != nil {
+			m.showStatus("prune failed: " + err.Error())
+			return m, nil
+		}
+		m.selected = map[string]bool{}
+		m.reloadCleanup()
+		m.showStatus(strings.Join([]string{"pruned", intStr(deleted), "candidates"}, " "))
+	case "o":
+		if len(m.cleanup) > 0 {
+			return m, openEditorCmd(m.cleanup[m.cleanupCursor].Path)
+		}
+	case "y":
+		if len(m.cleanup) > 0 {
+			return m, copyToClipboardCmd(m.cleanup[m.cleanupCursor].Path, "cleanup path")
+		}
+	}
+	return m, nil
+}

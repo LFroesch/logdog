@@ -3,84 +3,31 @@ package tui
 import "github.com/charmbracelet/lipgloss"
 
 var (
-	colorPurple  = lipgloss.Color("99")
-	colorGreen   = lipgloss.Color("46")
-	colorOrange  = lipgloss.Color("208")
-	colorRed     = lipgloss.Color("196")
-	colorBlue    = lipgloss.Color("39")
-	colorDim     = lipgloss.Color("240")
-	colorNormal  = lipgloss.Color("252")
-	colorYellow  = lipgloss.Color("226")
-	colorBg      = lipgloss.Color("235")
-	colorSelected = lipgloss.Color("57")
-	colorSelFg   = lipgloss.Color("230")
+	colorPrimary = lipgloss.Color("#5AF78E")
+	colorAccent  = lipgloss.Color("#57C7FF")
+	colorWarn    = lipgloss.Color("#F3C969")
+	colorError   = lipgloss.Color("#FF5C57")
+	colorDim     = lipgloss.Color("#9AA4B2")
+	colorBorder  = lipgloss.Color("#6C7A89")
+	colorCursor  = lipgloss.Color("#25384A")
+	colorText    = lipgloss.Color("#EEEEEE")
 
-	styleHeader = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorPurple).
-			Background(colorBg).
-			Padding(0, 1)
-
-	styleFooter = lipgloss.NewStyle().
-			Foreground(colorDim).
-			Background(colorBg).
-			Padding(0, 1)
-
-	styleSelected = lipgloss.NewStyle().
-			Background(colorSelected).
-			Foreground(colorSelFg)
-
-	styleNormal = lipgloss.NewStyle().
-			Foreground(colorNormal)
-
-	styleDim = lipgloss.NewStyle().
-			Foreground(colorDim)
-
-	styleBold = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorNormal)
-
-	styleTitle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorPurple)
-
-	styleSuccess = lipgloss.NewStyle().
-			Foreground(colorGreen)
-
-	styleError = lipgloss.NewStyle().
-			Foreground(colorRed).
-			Bold(true)
-
-	styleWarn = lipgloss.NewStyle().
-			Foreground(colorOrange).
-			Bold(true)
-
-	styleInfo = lipgloss.NewStyle().
-			Foreground(colorGreen).
-			Bold(true)
-
-	styleDebug = lipgloss.NewStyle().
-			Foreground(colorDim).
-			Bold(true)
-
-	styleOverlay = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorPurple).
-			Background(colorBg).
-			Padding(1, 2)
+	titleStyle        = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary)
+	activeTabStyle    = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary).Underline(true)
+	dimStyle          = lipgloss.NewStyle().Foreground(colorDim)
+	keyStyle          = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	actionStyle       = lipgloss.NewStyle().Foreground(colorPrimary)
+	bulletStyle       = lipgloss.NewStyle().Foreground(colorDim)
+	accentStyle       = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	currentStyle      = lipgloss.NewStyle().Foreground(colorPrimary).Bold(true)
+	warnStyle         = lipgloss.NewStyle().Foreground(colorWarn).Bold(true)
+	errorTextStyle    = lipgloss.NewStyle().Foreground(colorError).Bold(true)
+	statusStyle       = lipgloss.NewStyle().Foreground(colorAccent)
+	panelStyle        = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorBorder).Padding(0, 1)
+	panelActiveStyle  = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colorAccent).Padding(0, 1)
+	panelHeaderStyle  = lipgloss.NewStyle().Foreground(colorAccent).Bold(true)
+	selectedItemStyle = lipgloss.NewStyle().Foreground(colorText).Background(colorCursor).Bold(true)
+	labelStyle        = lipgloss.NewStyle().Foreground(colorAccent).Width(8)
+	detailStyle       = lipgloss.NewStyle().Foreground(colorText)
+	helpStyle         = lipgloss.NewStyle().Padding(1, 2)
 )
-
-func levelStyle(level string) lipgloss.Style {
-	switch level {
-	case "ERROR":
-		return styleError
-	case "WARN":
-		return styleWarn
-	case "INFO":
-		return styleInfo
-	case "DEBUG":
-		return styleDebug
-	default:
-		return styleNormal
-	}
-}

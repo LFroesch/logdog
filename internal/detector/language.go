@@ -4,6 +4,7 @@ type Language interface {
 	Name() string
 	Detect(projectPath string) bool
 	Install(projectPath string, config Config) error
+	InstalledPath(projectPath string) string
 	GetLogPaths(projectPath string) []string
 }
 

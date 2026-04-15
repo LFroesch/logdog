@@ -3,9 +3,10 @@ package detector
 import (
 	"fmt"
 	"os"
-	"os/user"
 	"path/filepath"
 	"text/template"
+
+	appconfig "github.com/LFroesch/logdog/internal/config"
 )
 
 type GoLanguage struct{}
@@ -20,20 +21,11 @@ func (g *GoLanguage) Detect(projectPath string) bool {
 	return err == nil
 }
 
-func (g *GoLanguage) Install(projectPath string, config Config) error {
-
-	// Get user home directory
-	usr, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("failed to get user home directory: %w", err)
+func (g *GoLanguage) Install(projectPath string, cfg Config) error {
+	projectLogDir := cfg.OutputDir
+	if projectLogDir == "" {
+		projectLogDir = appconfig.ProjectLogDir(projectPath)
 	}
-
-	// Get project name from path
-	projectName := filepath.Base(projectPath)
-	
-	// Create ~/logdog/<project-name> directory structure
-	homeLogdogDir := filepath.Join(usr.HomeDir, "logdog")
-	projectLogDir := filepath.Join(homeLogdogDir, projectName)
 
 	if err := os.MkdirAll(projectLogDir, 0755); err != nil {
 		return fmt.Errorf("failed to create logs directory: %w", err)
@@ -45,13 +37,11 @@ func (g *GoLanguage) Install(projectPath string, config Config) error {
 		return fmt.Errorf("failed to create internal directory: %w", err)
 	}
 
-	// Generate logger.go with new log directory
 	loggerPath := filepath.Join(internalDir, "logger.go")
-	
-	// Update config to use the new log directory
-	updatedConfig := config
+
+	updatedConfig := cfg
 	updatedConfig.OutputDir = projectLogDir
-	
+
 	if err := g.generateLogger(loggerPath, updatedConfig); err != nil {
 		return fmt.Errorf("failed to generate logger: %w", err)
 	}
@@ -76,25 +66,19 @@ func (g *GoLanguage) generateReadme(outputPath string) error {
 	return err
 }
 
-func (g *GoLanguage) GetLogPaths(projectPath string) []string {
-	// Get user home directory
-	usr, err := user.Current()
-	if err != nil {
-		return []string{}
-	}
+func (g *GoLanguage) InstalledPath(projectPath string) string {
+	return filepath.Join(projectPath, "internal", "logdog", "logger.go")
+}
 
-	// Get project name from path
-	projectName := filepath.Base(projectPath)
-	
-	// Look in ~/logdog/<project-name>/
-	logsDir := filepath.Join(usr.HomeDir, "logdog", projectName)
+func (g *GoLanguage) GetLogPaths(projectPath string) []string {
+	logsDir := appconfig.ProjectLogDir(projectPath)
 	var paths []string
 
 	filepath.Walk(logsDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !info.IsDir() && filepath.Ext(path) == ".json" {
+		if !info.IsDir() && (filepath.Ext(path) == ".jsonl" || filepath.Ext(path) == ".json") {
 			paths = append(paths, path)
 		}
 		return nil
@@ -173,7 +157,7 @@ logdog.Info("User action",
 
 ## Log Output
 
-Logs are written as JSON to ` + "`~/logdog/<project-name>/<project-name>-logdog-MM-DD-YYYY.json`" + `:
+Logs are written as JSON Lines to ` + "`~/.local/share/logdog/<project-name>/logs/<project-name>-YYYY-MM-DD.jsonl`" + ` by default:
 
 ` + "```json" + `
 {
@@ -198,9 +182,10 @@ your-project/
 │   └── README.md          # This documentation
 └── go.mod
 
-~/logdog/
+~/.local/share/logdog/
 └── your-project/
-    └── your-project-logdog-01-15-2024.json
+    └── logs/
+        └── your-project-2024-01-15.jsonl
 ` + "```" + `
 
 ## Best Practices
@@ -291,9 +276,11 @@ type LogEntry struct {
 }
 
 type Logger struct {
-	mu       sync.Mutex
-	logLevel LogLevel
-	logDir   string
+	mu          sync.Mutex
+	logLevel    LogLevel
+	logDir      string
+	file        *os.File
+	currentDate string
 }
 
 var defaultLogger *Logger
@@ -319,6 +306,16 @@ func SetLevel(level LogLevel) {
 	defaultLogger.logLevel = level
 }
 
+// Close flushes and closes the open log file. Call on shutdown.
+func Close() {
+	defaultLogger.mu.Lock()
+	defer defaultLogger.mu.Unlock()
+	if defaultLogger.file != nil {
+		defaultLogger.file.Close()
+		defaultLogger.file = nil
+	}
+}
+
 func levelRank(l LogLevel) int {
 	switch l {
 	case DEBUG:
@@ -333,6 +330,25 @@ func levelRank(l LogLevel) int {
 	return 1
 }
 
+func (l *Logger) rotate(today string) error {
+	if l.file != nil {
+		l.file.Close()
+		l.file = nil
+	}
+	if err := os.MkdirAll(l.logDir, 0755); err != nil {
+		return err
+	}
+	projectName := filepath.Base(filepath.Dir(l.logDir))
+	logPath := filepath.Join(l.logDir, fmt.Sprintf("%s-%s.jsonl", projectName, today))
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	l.file = f
+	l.currentDate = today
+	return nil
+}
+
 func (l *Logger) log(level LogLevel, message string, data map[string]interface{}) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -341,33 +357,29 @@ func (l *Logger) log(level LogLevel, message string, data map[string]interface{}
 		return
 	}
 
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	if l.file == nil || l.currentDate != today {
+		if err := l.rotate(today); err != nil {
+			return
+		}
+	}
+
 	entry := LogEntry{
-		Timestamp: time.Now().Format(time.RFC3339),
+		Timestamp: now.Format(time.RFC3339),
 		Level:     level,
 		Message:   message,
 		Data:      data,
 	}
-
-	projectName := filepath.Base(l.logDir)
-	filename := fmt.Sprintf("%s-logdog-%s.json", projectName, time.Now().Format("2006-01-02"))
-	logPath := filepath.Join(l.logDir, filename)
-
-	if err := os.MkdirAll(l.logDir, 0755); err != nil {
-		return
-	}
-
-	file, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
-	if err != nil {
-		return
-	}
-	defer file.Close()
-
 	jsonData, _ := json.Marshal(entry)
-	file.WriteString(string(jsonData) + "\n")
+	fmt.Fprintln(l.file, string(jsonData))
 }
 
 func buildData(args ...interface{}) map[string]interface{} {
-	data := make(map[string]interface{})
+	if len(args) == 0 {
+		return nil
+	}
+	data := make(map[string]interface{}, len(args)/2)
 	for i := 0; i+1 < len(args); i += 2 {
 		if key, ok := args[i].(string); ok {
 			data[key] = args[i+1]

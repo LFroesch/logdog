@@ -50,7 +50,7 @@ logdog.Info("User action",
 
 ## Log Output
 
-Logs are written as JSON to `~/logdog/<project-name>/<project-name>-logdog-MM-DD-YYYY.json`:
+Logs are written as JSON Lines to `~/.local/share/logdog/<project-name>/logs/<project-name>-YYYY-MM-DD.jsonl` by default:
 
 ```json
 {
@@ -75,9 +75,10 @@ your-project/
 │   └── README.md          # This documentation
 └── go.mod
 
-~/logdog/
+~/.local/share/logdog/
 └── your-project/
-    └── your-project-logdog-01-15-2024.json
+    └── logs/
+        └── your-project-2024-01-15.jsonl
 ```
 
 ## Best Practices

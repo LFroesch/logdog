@@ -14,17 +14,13 @@
 # Go workspace file
 go.work
 
-# Built binaries (app-specific)
-backup-xd
-dwight
-git-helper
-lif
+# Built binary
 logdog
-portmon
-project-launcher
-scout
-scriptgodx
-zap
+
+# Test/cache artifacts
+test.log
+.gocache/
+.codex/
 
 # OS files
 .DS_Store

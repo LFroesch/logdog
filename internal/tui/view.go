@@ -2,475 +2,566 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/LFroesch/logdog/internal/config"
+	"github.com/LFroesch/logdog/internal/detector"
+	"github.com/LFroesch/logdog/internal/logs"
 	"github.com/charmbracelet/lipgloss"
 )
 
-const uiOverhead = 4 // header + footer + padding
-
 func (m Model) View() string {
-	if m.width == 0 {
+	if m.width == 0 || m.height == 0 {
 		return "loading..."
 	}
-	if m.showHelp {
-		return m.renderHelp()
+	if m.mode == modeHelp {
+		header := m.renderHeader()
+		sep := dimStyle.Render(strings.Repeat("─", m.width))
+		footer := m.renderFooter()
+		return lipgloss.JoinVertical(lipgloss.Left, header, sep, m.renderHelp(), sep, footer)
 	}
 
 	header := m.renderHeader()
-	footer := m.renderFooter()
-
-	// content height between header and footer
-	contentH := m.height - 4
-	if contentH < 3 {
-		contentH = 3
-	}
+	sep := dimStyle.Render(strings.Repeat("─", m.width))
 
 	var content string
-	switch m.screen {
-	case screenMain:
-		content = m.renderMain()
-	case screenInstall:
-		content = m.renderInstall()
-	case screenLogs:
-		content = m.renderLogs(contentH)
-	case screenLogView:
-		content = m.renderLogView(contentH)
-	case screenSettings:
-		content = m.renderSettings()
-	case screenGlobalProjects:
-		content = m.renderGlobalProjects(contentH)
-	default:
-		content = m.renderMain()
+	switch m.page {
+	case pageDashboard:
+		content = m.renderDashboard()
+	case pageSetup:
+		content = m.renderSetupPage()
+	case pageCleanup:
+		content = m.renderCleanupPage()
 	}
 
-	// overlay detail panel on top of log viewer
-	if m.screen == screenLogView && m.detailEntry != nil {
-		base := lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
-		overlay := m.renderDetailOverlay()
-		return placeOverlay(base, overlay, m.width, m.height)
+	var statusLine string
+	if m.statusMsg != "" && time.Now().Before(m.statusExpiry) {
+		statusLine = statusStyle.Render("  " + m.statusMsg)
 	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, header, content, footer)
+	footer := m.renderFooter()
+	parts := []string{header, sep, content}
+	if statusLine != "" {
+		parts = append(parts, statusLine)
+	}
+	parts = append(parts, sep, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
-
-// --- header ---
 
 func (m Model) renderHeader() string {
-	var parts []string
-
-	parts = append(parts, styleTitle.Render("🐕 logdog"))
-
-	if m.language != nil {
-		parts = append(parts, styleDim.Render("│"))
-		parts = append(parts, styleDim.Render(m.language.Name()))
-		parts = append(parts, styleDim.Render(filepath.Base(m.projectPath)))
+	tabs := []struct {
+		name string
+		page page
+	}{
+		{"Dashboard", pageDashboard},
+		{"Setup", pageSetup},
+		{"Cleanup", pageCleanup},
 	}
 
-	if len(m.logFiles) > 0 {
-		parts = append(parts, styleDim.Render(fmt.Sprintf("%d files", len(m.logFiles))))
+	var renderedTabs []string
+	for i, tab := range tabs {
+		if i > 0 {
+			renderedTabs = append(renderedTabs, dimStyle.Render(" │ "))
+		}
+		if tab.page == m.page {
+			renderedTabs = append(renderedTabs, activeTabStyle.Render(tab.name))
+		} else {
+			renderedTabs = append(renderedTabs, dimStyle.Render(tab.name))
+		}
 	}
 
-	// level filter indicator in log viewer
-	if m.screen == screenLogView && m.levelFilter != "" {
-		parts = append(parts, levelStyle(m.levelFilter).Render("["+m.levelFilter+"]"))
+	left := titleStyle.Render("logdog") + "  " + strings.Join(renderedTabs, "")
+	right := m.headerStatusText()
+	switch m.mode {
+	case modeSearch:
+		right = "/ " + m.searchInput + "█"
+	case modeInput:
+		right = "add root: " + m.inputBuf + "█"
 	}
-	if m.screen == screenLogView && m.searchQuery != "" {
-		parts = append(parts, styleDim.Render("search: "+m.searchQuery))
-	}
-
-	title := strings.Join(parts, "  ")
-	return styleHeader.Width(m.width).Render(title)
+	return joinHeaderSides(left, dimStyle.Render(trim(right, max(12, m.width/2))), m.width)
 }
-
-// --- footer ---
 
 func (m Model) renderFooter() string {
-	var hints string
-	switch m.screen {
-	case screenMain:
-		hints = "j/k: move  enter: select  q: quit"
-	case screenInstall:
-		hints = "enter: install  esc: back"
-	case screenLogs:
-		hints = "j/k: move  enter/v: view  d: delete  c: clear old  esc: back"
-	case screenLogView:
-		if m.searching {
-			hints = fmt.Sprintf("search: %s█  enter: confirm  esc: cancel", m.searchQuery)
-		} else {
-			hints = "j/k: scroll  enter: detail  /: search  e/w/i/d: filter level  c: clear  esc: back"
+	var parts []string
+	add := func(key, action string) {
+		if len(parts) > 0 {
+			parts = append(parts, bulletStyle.Render(" · "))
 		}
-	case screenSettings:
-		hints = "+/-: retention days  esc: back"
-	case screenGlobalProjects:
-		hints = "j/k: move  enter: select  esc: back"
+		parts = append(parts, keyStyle.Render(key), " ", actionStyle.Render(action))
 	}
 
-	if m.message != "" {
-		hints = m.message
+	switch m.mode {
+	case modeSearch:
+		add("type", "search")
+		add("enter", "apply")
+		add("esc", "cancel")
+		return strings.Join(parts, "")
+	case modeInput:
+		add("type", "path")
+		add("enter", "add root")
+		add("esc", "cancel")
+		return strings.Join(parts, "")
 	}
 
-	return styleFooter.Width(m.width).Render(hints)
-}
+	switch m.page {
+	case pageDashboard:
+		add("tab", "panel")
+		add("j/k", "move")
+		add("enter", "focus/open")
+		if m.focus == focusViewer {
+			add("esc", "back")
+		}
+		add("/", "search")
+		add("y", m.copyHint())
+		if m.focus == focusViewer {
+			add("Y", "copy raw")
+		}
+		add("l", "level")
+		add("t", "follow")
+		add("o", "open")
+		add("pgup/pgdn", "page")
+	case pageSetup:
+		add("i", "install")
+		add("n", "add root")
+		add("a/A", "add cwd/parent")
+		add("enter", "open root")
+		add("d", "remove root")
+		add("y", "copy path")
+		add("o", "open config")
+	case pageCleanup:
+		add("space", "select")
+		add("x", "delete")
+		add("D", "delete selected")
+		add("X", "prune old")
+		add("y", "copy path")
+		add("o", "open")
+	}
 
-// --- screens ---
-
-func (m Model) renderMain() string {
-	var sb strings.Builder
-
-	// project status card
-	if m.language != nil {
-		sb.WriteString(styleBold.Render("project") + "  " + m.projectPath + "\n")
-		sb.WriteString(styleBold.Render("language") + " " + m.language.Name() + "\n")
-		sb.WriteString(styleBold.Render("logs") + "     " + fmt.Sprintf("%d file(s)", len(m.logFiles)) + "\n")
+	add("1-3", "pages")
+	add("r", "reload")
+	add("?", "help")
+	if m.page == pageDashboard {
+		add("q", "quit")
 	} else {
-		sb.WriteString(styleDim.Render("no supported project detected in "+m.projectPath) + "\n")
-	}
-	sb.WriteString("\n")
-
-	options := []string{
-		"Install / Setup Logger",
-		"View Logs",
-		"View All Logs (Global)",
-		"Settings",
-		"Quit",
+		add("q", "dashboard")
 	}
 
-	for i, opt := range options {
-		if i == m.cursor {
-			sb.WriteString(styleSelected.Render(fmt.Sprintf("  > %-30s", opt)))
-		} else {
-			sb.WriteString(styleNormal.Render(fmt.Sprintf("    %-30s", opt)))
-		}
-		sb.WriteString("\n")
-	}
-
-	return sb.String()
+	return strings.Join(parts, "")
 }
 
-func (m Model) renderInstall() string {
-	if m.language == nil {
-		return styleDim.Render("no supported language detected\n\npress esc to go back")
-	}
-	var sb strings.Builder
-	sb.WriteString(styleBold.Render("Install Logger") + "\n\n")
-	sb.WriteString(fmt.Sprintf("Project: %s (%s)\n\n", filepath.Base(m.projectPath), m.language.Name()))
-	sb.WriteString("This will create:\n")
-	sb.WriteString(styleDim.Render("  internal/logdog/logger.go\n"))
-	sb.WriteString(styleDim.Render("  ~/logdog/"+filepath.Base(m.projectPath)+"/\n\n"))
-	sb.WriteString("Press enter to install, esc to cancel.")
-	return sb.String()
+func (m Model) renderDashboard() string {
+	leftW, rightW := splitPaneWidths(m.width, 42, 40)
+	left := m.renderFilesPane(leftW, m.focus == focusFiles)
+	right := m.renderViewerPane(rightW, m.focus == focusViewer)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 }
 
-func (m Model) renderLogs(contentH int) string {
-	if len(m.logFiles) == 0 {
-		return styleDim.Render("no log files found\n\nrun 'logdog install' first")
+func (m Model) renderFilesPane(width int, active bool) string {
+	header := fmt.Sprintf("Logs (%d)", len(m.files))
+	if m.search != "" && len(m.files) < len(m.allFiles) {
+		header = fmt.Sprintf("Logs (%d/%d filtered)", len(m.files), len(m.allFiles))
+	}
+	lines := []string{panelHeaderStyle.Render(header)}
+	if len(m.files) == 0 {
+		lines = append(lines, "", dimStyle.Render("No logs found"), "", dimStyle.Render("logdog always scans the current directory recursively."))
+		return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
 	}
 
-	var sb strings.Builder
-	sb.WriteString(styleBold.Render("Log Files"))
-	if m.selectedProject != "" {
-		sb.WriteString(styleDim.Render("  " + m.selectedProject))
-	}
-	sb.WriteString("\n\n")
-
-	// sort by mod time newest first
-	type fileEntry struct {
-		path    string
-		modTime time.Time
-		count   int
-	}
-	var files []fileEntry
-	for _, f := range m.logFiles {
-		info, _ := os.Stat(f)
-		mt := time.Time{}
-		if info != nil {
-			mt = info.ModTime()
+	start, end := entryWindow(len(m.files), m.fileScroll, max(1, m.paneHeight()-2))
+	lastGroup := ""
+	for i := start; i < end; i++ {
+		file := m.files[i]
+		group := m.fileGroupLabel(file, width-6)
+		if group != lastGroup {
+			if lastGroup != "" {
+				lines = append(lines, "")
+			}
+			lines = append(lines, dimStyle.Render(group+"/"))
+			lastGroup = group
 		}
-		files = append(files, fileEntry{f, mt, getLogEntryCount(f)})
-	}
-	sort.Slice(files, func(i, j int) bool {
-		return files[i].modTime.After(files[j].modTime)
-	})
-
-	visible := files
-	if len(visible) > contentH-4 {
-		visible = visible[:contentH-4]
-	}
-
-	for i, f := range visible {
-		name := filepath.Base(f.path)
-		date := styleDim.Render(f.modTime.Format("2006-01-02"))
-		count := styleDim.Render(fmt.Sprintf("%4d entries", f.count))
-		row := fmt.Sprintf("  %-36s %s  %s", name, date, count)
-		if i == m.cursor {
-			sb.WriteString(styleSelected.Render(row))
-		} else {
-			sb.WriteString(styleNormal.Render(row))
+		name := trim(filepath.Base(file.Path), max(12, width/2))
+		meta := dimStyle.Render(fmt.Sprintf("%s  %s", byteLabel(file.Size), file.ModTime.Format("01-02 15:04")))
+		row := joinPaneSides("    "+name, meta, width-4)
+		if i == m.fileCursor {
+			row = selectedItemStyle.Render(joinPaneSides("  ▸ "+name, meta, width-4))
 		}
-		sb.WriteString("\n")
+		lines = append(lines, row)
 	}
-
-	if m.confirmingDelete || m.confirmingClear {
-		sb.WriteString("\n" + styleWarn.Render(m.message))
-	}
-
-	return sb.String()
+	return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
 }
 
-func (m Model) renderLogView(contentH int) string {
-	entries := m.filteredEntries()
+func (m Model) renderViewerPane(width int, active bool) string {
+	lines := []string{panelHeaderStyle.Render("Viewer")}
+	if len(m.files) == 0 {
+		lines = append(lines, "", dimStyle.Render("Select a log file"))
+		return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	}
 
-	var sb strings.Builder
+	file := m.files[m.fileCursor]
+	lines = append(lines,
+		labelStyle.Render("Path")+detailStyle.Render(trimMiddle(file.Path, width-10)),
+		labelStyle.Render("Dir")+detailStyle.Render(trimMiddle(filepath.Dir(file.Path), width-10)),
+		labelStyle.Render("Type")+detailStyle.Render(string(file.Format)),
+		labelStyle.Render("Size")+detailStyle.Render(byteLabel(file.Size)),
+		labelStyle.Render("Lines")+detailStyle.Render(intStr(file.EntryCount)),
+		labelStyle.Render("Mod")+detailStyle.Render(file.ModTime.Format("2006-01-02 15:04:05")),
+		"",
+	)
 
-	// stats line
-	total := len(m.logEntries)
-	showing := len(entries)
-	if m.levelFilter != "" || m.searchQuery != "" {
-		sb.WriteString(styleDim.Render(fmt.Sprintf("showing %d / %d entries", showing, total)))
+	if len(m.entries) == 0 {
+		lines = append(lines, dimStyle.Render("No entries match current filters"))
+		return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	}
+
+	listHeight := m.viewerEntryListHeight()
+	start, end := entryWindow(len(m.entries), m.entryScroll, listHeight)
+	for i := start; i < end; i++ {
+		row := formatEntryRow(m.entries[i], width-4)
+		if i == m.entryCursor {
+			row = selectedItemStyle.Render(row)
+		}
+		lines = append(lines, row)
+	}
+	lines = append(lines, "")
+	lines = append(lines, panelHeaderStyle.Render("Detail"))
+	lines = append(lines, m.renderEntryDetail(width-4, max(4, m.paneHeight()-len(lines)-3))...)
+	return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderSetupPage() string {
+	leftW, rightW := splitPaneWidths(m.width, 38, 40)
+	left := m.renderProjectPane(leftW)
+	right := m.renderSetupPane(rightW)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
+
+func (m Model) renderProjectPane(width int) string {
+	defaultRoot := config.ResolvePaths().DataDir
+	lines := []string{
+		panelHeaderStyle.Render("Project"),
+		"",
+		labelStyle.Render("Name") + detailStyle.Render(m.projectName),
+		labelStyle.Render("Path") + detailStyle.Render(trimMiddle(m.projectPath, width-10)),
+		labelStyle.Render("Lang") + detailStyle.Render(languageName(m.language)),
+		labelStyle.Render("Setup") + statusValue(m.installed),
+		labelStyle.Render("Logs") + detailStyle.Render(trimMiddle(config.ProjectLogDir(m.projectPath), width-10)),
+		"",
+		panelHeaderStyle.Render("Discovery"),
+		"Current project is always scanned.",
+		labelStyle.Render("Default") + detailStyle.Render(trimMiddle(defaultRoot, width-10)),
+		"Configured roots are extra search locations.",
+	}
+	return panelStyle.Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderSetupPane(width int) string {
+	defaultRoot := config.ResolvePaths().DataDir
+	lines := []string{
+		panelHeaderStyle.Render("Roots"),
+		"",
+		labelStyle.Render("Config") + detailStyle.Render(trimMiddle(m.configPath, width-10)),
+		labelStyle.Render("Roots") + detailStyle.Render(fmt.Sprintf("%d extra configured", len(m.cfg.Roots))),
+		labelStyle.Render("Default") + detailStyle.Render(trimMiddle(defaultRoot, width-10)),
+		"",
+		panelHeaderStyle.Render("Install"),
+		"Press " + keyStyle.Render("i") + " to install/update logger files for this project.",
+		"",
+		panelHeaderStyle.Render("Extra Roots"),
+		"Press " + keyStyle.Render("n") + " to add a custom directory root.",
+	}
+	if len(m.cfg.Roots) == 0 {
+		lines = append(lines, "  "+dimStyle.Render("No extra roots configured"))
 	} else {
-		sb.WriteString(styleDim.Render(fmt.Sprintf("%d entries", total)))
+		start, end := entryWindow(len(m.cfg.Roots), m.rootScroll, max(4, m.paneHeight()-12))
+		for i := start; i < end; i++ {
+			root := trimMiddle(m.cfg.Roots[i], width-8)
+			row := "  " + root
+			if i == m.rootCursor && m.focus == focusSetupRoots {
+				row = selectedItemStyle.Render("▸ " + root)
+			}
+			lines = append(lines, row)
+		}
 	}
-	sb.WriteString("\n\n")
+	return panelStyleFor(m.focus == focusSetupRoots).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+}
 
-	if len(entries) == 0 {
-		sb.WriteString(styleDim.Render("no entries match filter"))
-		return sb.String()
-	}
+func (m Model) renderCleanupPage() string {
+	leftW, rightW := splitPaneWidths(m.width, 42, 40)
+	left := m.renderCleanupList(leftW)
+	right := m.renderCleanupDetail(rightW)
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+}
 
-	// clamp scroll
-	maxScroll := len(entries) - 1
-	if maxScroll < 0 {
-		maxScroll = 0
+func (m Model) renderCleanupList(width int) string {
+	lines := []string{panelHeaderStyle.Render(fmt.Sprintf("Cleanup (%d)", len(m.cleanup)))}
+	if len(m.cleanup) == 0 {
+		lines = append(lines, "", dimStyle.Render("No cleanup candidates"))
+		return panelStyleFor(m.focus == focusCleanupList).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
 	}
-	scroll := m.logScroll
+	start, end := entryWindow(len(m.cleanup), m.cleanupScroll, max(1, m.paneHeight()-2))
+	for i := start; i < end; i++ {
+		item := m.cleanup[i]
+		name := trim(filepath.Base(item.Path), max(12, width/2))
+		metaParts := []string{item.Kind, byteLabel(item.Size), item.ModTime.Format("01-02 15:04")}
+		if m.selected[item.Path] {
+			metaParts = append([]string{"selected"}, metaParts...)
+		}
+		meta := dimStyle.Render(strings.Join(metaParts, "  "))
+		row := joinPaneSides("  "+name, meta, width-4)
+		if i == m.cleanupCursor {
+			row = selectedItemStyle.Render(joinPaneSides("▸ "+name, meta, width-4))
+		}
+		lines = append(lines, row)
+	}
+	return panelStyleFor(m.focus == focusCleanupList).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderCleanupDetail(width int) string {
+	lines := []string{panelHeaderStyle.Render("Detail")}
+	if len(m.cleanup) == 0 {
+		lines = append(lines, "", dimStyle.Render("Select a cleanup candidate"))
+		return panelStyleFor(m.focus == focusCleanupDetail).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	}
+	item := m.cleanup[m.cleanupCursor]
+	lines = append(lines,
+		labelStyle.Render("Path")+detailStyle.Render(trimMiddle(item.Path, width-10)),
+		labelStyle.Render("Kind")+detailStyle.Render(item.Kind),
+		labelStyle.Render("Size")+detailStyle.Render(byteLabel(item.Size)),
+		labelStyle.Render("Mod")+detailStyle.Render(item.ModTime.Format("2006-01-02 15:04:05")),
+		"",
+		panelHeaderStyle.Render("Policy"),
+		detailStyle.Render(fmt.Sprintf("Prune threshold: %d days", m.cfg.CleanupKeepDays)),
+	)
+	return panelStyleFor(m.focus == focusCleanupDetail).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+}
+
+func (m Model) renderEntryDetail(width, height int) []string {
+	if len(m.entries) == 0 || m.entryCursor >= len(m.entries) {
+		return []string{dimStyle.Render("Select an entry")}
+	}
+	entry := m.entries[m.entryCursor]
+	lines := []string{
+		labelStyle.Render("Time") + detailStyle.Render(formatTime(entry.Timestamp)),
+		labelStyle.Render("Level") + levelStyleText(entry.Level),
+		labelStyle.Render("Msg") + detailStyle.Render(trim(entry.Message, width-8)),
+	}
+	if len(entry.Data) == 0 {
+		lines = append(lines, dimStyle.Render(trim(entry.Raw, width)))
+		return lines
+	}
+	keys := make([]string, 0, len(entry.Data))
+	for key := range entry.Data {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		lines = append(lines, dimStyle.Render(trim(fmt.Sprintf("%s=%v", key, entry.Data[key]), width)))
+	}
+	if height <= 0 || len(lines) <= height {
+		return lines
+	}
+	maxScroll := len(lines) - height
+	scroll := m.detailScroll
 	if scroll > maxScroll {
 		scroll = maxScroll
 	}
-
-	viewH := contentH - 3
-	if viewH < 1 {
-		viewH = 1
+	if scroll < 0 {
+		scroll = 0
 	}
-	end := scroll + viewH
-	if end > len(entries) {
-		end = len(entries)
+	start := scroll
+	end := min(len(lines), start+height)
+	out := append([]string{}, lines[start:end]...)
+	if end < len(lines) && len(out) > 0 {
+		out[len(out)-1] = dimStyle.Render("... more detail below")
 	}
-
-	for i, e := range entries[scroll:end] {
-		line := formatLogLine(e, m.width-4)
-		if scroll+i == scroll { // highlight "cursor" line for enter→detail
-			sb.WriteString(styleNormal.Render(line))
-		} else {
-			sb.WriteString(line)
-		}
-		sb.WriteString("\n")
-	}
-
-	// scroll indicator
-	if len(entries) > viewH {
-		pct := int(float64(scroll) / float64(maxScroll) * 100)
-		sb.WriteString(styleDim.Render(fmt.Sprintf("\n  [%d%%  line %d/%d]", pct, scroll+1, len(entries))))
-	}
-
-	return sb.String()
-}
-
-func formatLogLine(e LogEntry, maxWidth int) string {
-	ts := formatTimestamp(e.Timestamp)
-	lvl := levelStyle(strings.ToUpper(e.Level)).Render(fmt.Sprintf("%-5s", strings.ToUpper(e.Level)))
-	msg := styleNormal.Render(e.Message)
-
-	var dataParts []string
-	for k, v := range e.Data {
-		dataParts = append(dataParts, fmt.Sprintf("%s=%v", k, v))
-	}
-	dataStr := ""
-	if len(dataParts) > 0 {
-		dataStr = "  " + styleDim.Render("{"+strings.Join(dataParts, " ")+"}")
-	}
-
-	return styleDim.Render(ts) + "  " + lvl + "  " + msg + dataStr
-}
-
-func (m Model) renderDetailOverlay() string {
-	e := m.detailEntry
-	if e == nil {
-		return ""
-	}
-
-	var sb strings.Builder
-	sb.WriteString(levelStyle(strings.ToUpper(e.Level)).Render(strings.ToUpper(e.Level)))
-	sb.WriteString("  ")
-	sb.WriteString(styleDim.Render(formatTimestamp(e.Timestamp)))
-	sb.WriteString("\n\n")
-	sb.WriteString(styleBold.Render(e.Message))
-	sb.WriteString("\n")
-
-	if len(e.Data) > 0 {
-		sb.WriteString("\n")
-		// sort keys for stable display
-		keys := make([]string, 0, len(e.Data))
-		for k := range e.Data {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			sb.WriteString(fmt.Sprintf("  %-20s %v\n", styleDim.Render(k), e.Data[k]))
-		}
-	}
-
-	sb.WriteString("\n" + styleDim.Render("esc/enter to close"))
-
-	w := m.width / 2
-	if w < 50 {
-		w = 50
-	}
-	return styleOverlay.Width(w).Render(sb.String())
-}
-
-func (m Model) renderGlobalProjects(contentH int) string {
-	if len(m.globalProjects) == 0 {
-		return styleDim.Render("no projects found in ~/logdog/")
-	}
-
-	var sb strings.Builder
-	sb.WriteString(styleBold.Render("All Projects") + "\n\n")
-
-	for i, p := range m.globalProjects {
-		files := getLogFilesForProject(p)
-		row := fmt.Sprintf("  %-30s  %d file(s)", p, len(files))
-		if i == m.cursor {
-			sb.WriteString(styleSelected.Render(row))
-		} else {
-			sb.WriteString(styleNormal.Render(row))
-		}
-		sb.WriteString("\n")
-	}
-	_ = contentH
-	return sb.String()
-}
-
-func (m Model) renderSettings() string {
-	var sb strings.Builder
-	sb.WriteString(styleBold.Render("Settings") + "\n\n")
-	sb.WriteString(fmt.Sprintf("  Log retention:  %s days\n",
-		styleBold.Render(fmt.Sprintf("%d", m.retentionDays))))
-	sb.WriteString(styleDim.Render("  Use +/- to adjust\n"))
-	if m.message != "" {
-		sb.WriteString("\n" + styleSuccess.Render(m.message))
-	}
-	return sb.String()
-}
-
-// placeOverlay centers fg over bg string content.
-func placeOverlay(bg, fg string, w, h int) string {
-	bgLines := strings.Split(bg, "\n")
-	fgLines := strings.Split(fg, "\n")
-
-	fgH := len(fgLines)
-	fgW := 0
-	for _, l := range fgLines {
-		if lw := lipgloss.Width(l); lw > fgW {
-			fgW = lw
-		}
-	}
-
-	startX := (w - fgW) / 2
-	startY := (h - fgH) / 2
-	if startX < 0 {
-		startX = 0
-	}
-	if startY < 0 {
-		startY = 0
-	}
-
-	result := make([]string, len(bgLines))
-	copy(result, bgLines)
-
-	for i, fgLine := range fgLines {
-		idx := startY + i
-		if idx < 0 || idx >= len(bgLines) {
-			continue
-		}
-		bgLine := bgLines[idx]
-		bgW := lipgloss.Width(bgLine)
-
-		left := truncateAnsi(bgLine, startX)
-		lw := lipgloss.Width(left)
-		if lw < startX {
-			left += strings.Repeat(" ", startX-lw)
-		}
-
-		right := ""
-		rs := startX + fgW
-		if rs < bgW {
-			right = cutAnsi(bgLine, rs, bgW)
-		}
-
-		result[idx] = left + fgLine + right
-	}
-
-	return strings.Join(result, "\n")
-}
-
-// Simple ANSI-unaware truncate/cut — good enough for our overlay use case.
-func truncateAnsi(s string, n int) string {
-	w := 0
-	for i, r := range s {
-		if w >= n {
-			return s[:i]
-		}
-		w += lipgloss.Width(string(r))
-	}
-	return s
-}
-
-func cutAnsi(s string, start, _ int) string {
-	w := 0
-	for i, r := range s {
-		rw := lipgloss.Width(string(r))
-		if w+rw > start {
-			return s[i:]
-		}
-		w += rw
-	}
-	return ""
+	return out
 }
 
 func (m Model) renderHelp() string {
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(colorPurple).
-		Padding(1, 2).
-		Width(m.width - 4)
-
-	keys := []struct{ key, desc string }{
-		{"j/k, ↑/↓", "Navigate"},
-		{"enter/v", "Open log viewer"},
-		{"e/w/i/d", "Filter by level (ERROR/WARN/INFO/DEBUG)"},
-		{"c", "Clear filters"},
-		{"/", "Search"},
-		{"esc/q", "Back / quit"},
-		{"?", "Toggle this help"},
-		{"ctrl+c", "Quit immediately"},
+	lines := []string{
+		titleStyle.Render("Logdog Help"),
+		"",
+		panelHeaderStyle.Render("Pages"),
+		"  1  dashboard: browse files and inspect entries",
+		"  2  setup: install logger and manage discovery roots",
+		"  3  cleanup: delete rotated/archive logs and prune old data",
+		"",
+		panelHeaderStyle.Render("Dashboard"),
+		"  tab / shift+tab  switch list vs viewer",
+		"  enter            focus viewer or open file in editor",
+		"  esc              return to file list from viewer",
+		"  o                open selected file immediately",
+		"  /                search/filter by text (hides non-matching files)",
+		"  y                copy selected path or entry",
+		"  Y                copy raw entry in viewer",
+		"  l                cycle level filter",
+		"  t                toggle live follow",
+		"  pgup/pgdn        page entry list",
+		"  ctrl+u / ctrl+d  page entry list",
+		"",
+		panelHeaderStyle.Render("Setup"),
+		"  i                install logger into current Go project",
+		"  n                add a custom directory root (type path + enter)",
+		"  a / A            add project or parent directory to roots",
+		"  enter            open selected configured root",
+		"  d                remove selected configured root",
+		"  y                copy selected root path",
+		"  o                open config JSON in editor",
+		"",
+		panelHeaderStyle.Render("CLI"),
+		"  logdog status              show discovery summary",
+		"  logdog files               list discovered logs",
+		"  logdog cat [file]          print parsed entries",
+		"  logdog grep <pattern>      search logs or stdin",
+		"  logdog tail [file]         follow a file",
+		"  logdog config              print config and paths",
+		"  logdog config add-root DIR add discovery root",
+		"  logdog config remove-root DIR",
+		"",
+		panelHeaderStyle.Render("Cleanup"),
+		"  space            select candidate",
+		"  x                delete current candidate",
+		"  D                delete selected candidates",
+		"  X                prune by age",
+		"",
+		panelHeaderStyle.Render("Navigation"),
+		"  g / G            top / bottom",
+		"  j / k            move down / up",
+		"  q                quit or back to dashboard",
+		"  r                reload",
+		"  ?                toggle this help  (j/k/g/G to scroll)",
 	}
 
-	var lines []string
-	lines = append(lines, styleTitle.Render("logdog — Help"))
-	lines = append(lines, "")
-	for _, k := range keys {
-		lines = append(lines, fmt.Sprintf("  %-22s %s",
-			styleBold.Render(k.key), k.desc))
+	padding := helpStyle.GetVerticalPadding()
+	available := m.contentHeight() - padding
+	if available < 3 {
+		available = 3
 	}
-	lines = append(lines, "")
-	lines = append(lines, styleDim.Render("Press ?, q, or esc to close"))
 
-	return lipgloss.Place(m.width, m.height,
-		lipgloss.Center, lipgloss.Center,
-		box.Render(strings.Join(lines, "\n")))
+	maxScroll := max(0, len(lines)-available+1)
+	scroll := m.helpScroll
+	if scroll > maxScroll {
+		scroll = maxScroll
+	}
+	if scroll < 0 {
+		scroll = 0
+	}
+
+	end := min(len(lines), scroll+available-1)
+	visible := append([]string{}, lines[scroll:end]...)
+
+	indicator := fmt.Sprintf("  %d/%d", end, len(lines))
+	if end < len(lines) {
+		indicator += "  ↓ more"
+	}
+	visible = append(visible, dimStyle.Render(indicator))
+
+	return helpStyle.Width(m.width).Height(m.contentHeight()).Render(strings.Join(visible, "\n"))
+}
+
+func formatEntryRow(entry logs.Entry, width int) string {
+	ts := formatTime(entry.Timestamp)
+	level := strings.ToUpper(entry.Level)
+	if level == "" {
+		level = "LINE"
+	}
+	msg := trim(entry.Message, width-24)
+	row := fmt.Sprintf("  %s  %-5s  %s", ts, level, msg)
+	switch level {
+	case "ERROR", "FATAL":
+		return errorTextStyle.Render(row)
+	case "WARN", "WARNING":
+		return warnStyle.Render(row)
+	case "INFO":
+		return currentStyle.Render(row)
+	case "DEBUG", "TRACE":
+		return dimStyle.Render(row)
+	default:
+		return row
+	}
+}
+
+func (m Model) headerStatusText() string {
+	switch m.page {
+	case pageDashboard:
+		parts := []string{fmt.Sprintf("%d files", len(m.files))}
+		if len(m.files) > 0 {
+			parts = append(parts, trim(filepath.Base(m.files[m.fileCursor].Path), 28))
+		}
+		parts = append(parts, fmt.Sprintf("%d entries", len(m.entries)))
+		if m.levelFilter != "" {
+			parts = append(parts, "level "+m.levelFilter)
+		}
+		if m.search != "" {
+			parts = append(parts, fmt.Sprintf("search %q", trim(m.search, 18)))
+		}
+		if m.tailing {
+			parts = append(parts, "live")
+		}
+		return strings.Join(parts, " · ")
+	case pageSetup:
+		return fmt.Sprintf("%s · %d roots · %s", m.projectName, len(m.cfg.Roots), trimMiddle(m.configPath, 28))
+	case pageCleanup:
+		return fmt.Sprintf("%d candidates · %d selected · keep %d days", len(m.cleanup), len(m.selected), m.cfg.CleanupKeepDays)
+	default:
+		return m.projectName
+	}
+}
+
+func panelStyleFor(active bool) lipgloss.Style {
+	if active {
+		return panelActiveStyle
+	}
+	return panelStyle
+}
+
+func levelStyle(level string) lipgloss.Style {
+	switch strings.ToUpper(level) {
+	case "ERROR", "FATAL":
+		return errorTextStyle
+	case "WARN", "WARNING":
+		return warnStyle
+	case "INFO":
+		return currentStyle
+	case "DEBUG", "TRACE":
+		return dimStyle
+	default:
+		return dimStyle
+	}
+}
+
+func levelStyleText(level string) string {
+	if level == "" {
+		level = "LINE"
+	}
+	return levelStyle(level).Render(strings.ToUpper(level))
+}
+
+func statusValue(installed bool) string {
+	if installed {
+		return accentStyle.Render("installed")
+	}
+	return warnStyle.Render("not installed")
+}
+
+func languageName(lang detector.Language) string {
+	if lang == nil {
+		return "unknown"
+	}
+	return lang.Name()
+}
+
+func formatTime(value string) string {
+	if value == "" {
+		return "-- --:--:--"
+	}
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02 15:04:05"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return parsed.Format("01-02 15:04:05")
+		}
+	}
+	return trim(value, 14)
 }
