@@ -1,5 +1,10 @@
 ## DevLog
 
+### 2026-04-15: Two-pane height normalization
+- Fixed the side-by-side TUI pages so left/right panels render at the same final height even when one side wraps more content
+- Added a dashboard render regression test to lock the panel-height behavior in place
+- Touched `internal/tui/view.go` and `internal/tui/model_test.go`
+
 ### 2026-04-15: Viewer scroll follow fix
 - Fixed dashboard right-panel entry navigation so the selected log entry stays visible while moving through long result sets
 - Shared the viewer entry-list height calculation between rendering and `ensureEntryVisible()` to remove the scroll math mismatch

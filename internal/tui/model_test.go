@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/LFroesch/logdog/internal/logs"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func TestEnsureEntryVisibleKeepsTopSelectionInView(t *testing.T) {
@@ -73,5 +74,28 @@ func TestEnsureEntryVisibleClampsNegativeScrollOnSmallScreens(t *testing.T) {
 	}
 	if got := m.viewerEntryListHeight(); got < 5 {
 		t.Fatalf("viewerEntryListHeight() = %d, want at least 5", got)
+	}
+}
+
+func TestRenderFilesPaneClampsGroupedRowsToPaneHeight(t *testing.T) {
+	m := Model{
+		width:       120,
+		height:      18,
+		projectPath: "/home/lucas/projects/active/tui-suite/logdog",
+	}
+	for i := 0; i < 20; i++ {
+		m.files = append(m.files, logs.FileInfo{
+			Path:       "/home/lucas/projects/active/tui-suite/logdog/group" + string(rune('A'+i)) + "/app.log",
+			Root:       "/home/lucas/projects/active/tui-suite/logdog",
+			Format:     logs.FormatJSON,
+			Size:       1234,
+			EntryCount: 1,
+		})
+	}
+
+	rendered := m.renderFilesPane(42, true)
+
+	if got, want := lipgloss.Height(rendered), m.contentHeight(); got != want {
+		t.Fatalf("files pane height = %d, want %d", got, want)
 	}
 }

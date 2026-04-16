@@ -167,7 +167,7 @@ func (m Model) renderFilesPane(width int, active bool) string {
 	lines := []string{panelHeaderStyle.Render(header)}
 	if len(m.files) == 0 {
 		lines = append(lines, "", dimStyle.Render("No logs found"), "", dimStyle.Render("logdog always scans the current directory recursively."))
-		return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+		return renderPanel(panelStyleFor(active), width, m.paneHeight(), lines)
 	}
 
 	start, end := entryWindow(len(m.files), m.fileScroll, max(1, m.paneHeight()-2))
@@ -190,14 +190,14 @@ func (m Model) renderFilesPane(width int, active bool) string {
 		}
 		lines = append(lines, row)
 	}
-	return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	return renderPanel(panelStyleFor(active), width, m.paneHeight(), lines)
 }
 
 func (m Model) renderViewerPane(width int, active bool) string {
 	lines := []string{panelHeaderStyle.Render("Viewer")}
 	if len(m.files) == 0 {
 		lines = append(lines, "", dimStyle.Render("Select a log file"))
-		return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+		return renderPanel(panelStyleFor(active), width, m.paneHeight(), lines)
 	}
 
 	file := m.files[m.fileCursor]
@@ -213,7 +213,7 @@ func (m Model) renderViewerPane(width int, active bool) string {
 
 	if len(m.entries) == 0 {
 		lines = append(lines, dimStyle.Render("No entries match current filters"))
-		return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+		return renderPanel(panelStyleFor(active), width, m.paneHeight(), lines)
 	}
 
 	listHeight := m.viewerEntryListHeight()
@@ -228,7 +228,7 @@ func (m Model) renderViewerPane(width int, active bool) string {
 	lines = append(lines, "")
 	lines = append(lines, panelHeaderStyle.Render("Detail"))
 	lines = append(lines, m.renderEntryDetail(width-4, max(4, m.paneHeight()-len(lines)-3))...)
-	return panelStyleFor(active).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	return renderPanel(panelStyleFor(active), width, m.paneHeight(), lines)
 }
 
 func (m Model) renderSetupPage() string {
@@ -254,7 +254,7 @@ func (m Model) renderProjectPane(width int) string {
 		labelStyle.Render("Default") + detailStyle.Render(trimMiddle(defaultRoot, width-10)),
 		"Configured roots are extra search locations.",
 	}
-	return panelStyle.Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	return renderPanel(panelStyle, width, m.paneHeight(), lines)
 }
 
 func (m Model) renderSetupPane(width int) string {
@@ -285,7 +285,7 @@ func (m Model) renderSetupPane(width int) string {
 			lines = append(lines, row)
 		}
 	}
-	return panelStyleFor(m.focus == focusSetupRoots).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	return renderPanel(panelStyleFor(m.focus == focusSetupRoots), width, m.paneHeight(), lines)
 }
 
 func (m Model) renderCleanupPage() string {
@@ -299,7 +299,7 @@ func (m Model) renderCleanupList(width int) string {
 	lines := []string{panelHeaderStyle.Render(fmt.Sprintf("Cleanup (%d)", len(m.cleanup)))}
 	if len(m.cleanup) == 0 {
 		lines = append(lines, "", dimStyle.Render("No cleanup candidates"))
-		return panelStyleFor(m.focus == focusCleanupList).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+		return renderPanel(panelStyleFor(m.focus == focusCleanupList), width, m.paneHeight(), lines)
 	}
 	start, end := entryWindow(len(m.cleanup), m.cleanupScroll, max(1, m.paneHeight()-2))
 	for i := start; i < end; i++ {
@@ -316,14 +316,14 @@ func (m Model) renderCleanupList(width int) string {
 		}
 		lines = append(lines, row)
 	}
-	return panelStyleFor(m.focus == focusCleanupList).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	return renderPanel(panelStyleFor(m.focus == focusCleanupList), width, m.paneHeight(), lines)
 }
 
 func (m Model) renderCleanupDetail(width int) string {
 	lines := []string{panelHeaderStyle.Render("Detail")}
 	if len(m.cleanup) == 0 {
 		lines = append(lines, "", dimStyle.Render("Select a cleanup candidate"))
-		return panelStyleFor(m.focus == focusCleanupDetail).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+		return renderPanel(panelStyleFor(m.focus == focusCleanupDetail), width, m.paneHeight(), lines)
 	}
 	item := m.cleanup[m.cleanupCursor]
 	lines = append(lines,
@@ -335,7 +335,7 @@ func (m Model) renderCleanupDetail(width int) string {
 		panelHeaderStyle.Render("Policy"),
 		detailStyle.Render(fmt.Sprintf("Prune threshold: %d days", m.cfg.CleanupKeepDays)),
 	)
-	return panelStyleFor(m.focus == focusCleanupDetail).Width(width).Height(m.paneHeight()).Render(strings.Join(lines, "\n"))
+	return renderPanel(panelStyleFor(m.focus == focusCleanupDetail), width, m.paneHeight(), lines)
 }
 
 func (m Model) renderEntryDetail(width, height int) []string {
@@ -516,6 +516,19 @@ func panelStyleFor(active bool) lipgloss.Style {
 		return panelActiveStyle
 	}
 	return panelStyle
+}
+
+func renderPanel(style lipgloss.Style, width, height int, lines []string) string {
+	if height < 1 {
+		height = 1
+	}
+	if len(lines) > height {
+		lines = append([]string{}, lines[:height]...)
+		if height > 0 {
+			lines[height-1] = dimStyle.Render("...")
+		}
+	}
+	return style.Width(width).Height(height).Render(strings.Join(lines, "\n"))
 }
 
 func levelStyle(level string) lipgloss.Style {
