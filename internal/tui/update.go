@@ -84,6 +84,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = next.(Model)
 			cmd = nextCmd
 			return m, batchCmds(cmd, m.nextTickCmd())
+		case modeConfirm:
+			next, nextCmd := m.updateConfirm(msg)
+			m = next.(Model)
+			cmd = nextCmd
+			return m, batchCmds(cmd, m.nextTickCmd())
 		}
 		next, nextCmd := m.updateNormal(msg)
 		m = next.(Model)
@@ -176,6 +181,61 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+func (m Model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		kind := m.confirmKind
+		m.clearConfirm()
+		switch kind {
+		case "install":
+			m.installLogger()
+		case "deleteOne":
+			if len(m.cleanup) == 0 {
+				return m, nil
+			}
+			_, err := logs.DeleteCandidates([]logs.CleanupCandidate{m.cleanup[m.cleanupCursor]})
+			if err != nil {
+				m.showStatus("delete failed: " + err.Error())
+				return m, nil
+			}
+			m.reloadCleanup()
+			m.showStatus("deleted candidate")
+		case "deleteBatch":
+			var batch []logs.CleanupCandidate
+			for _, candidate := range m.cleanup {
+				if m.selected[candidate.Path] {
+					batch = append(batch, candidate)
+				}
+			}
+			if len(batch) == 0 {
+				m.showStatus("nothing selected")
+				return m, nil
+			}
+			deleted, err := logs.DeleteCandidates(batch)
+			if err != nil {
+				m.showStatus("delete failed: " + err.Error())
+				return m, nil
+			}
+			m.selected = map[string]bool{}
+			m.reloadCleanup()
+			m.showStatus(strings.Join([]string{"deleted", intStr(deleted), "candidates"}, " "))
+		case "prune":
+			deleted, err := m.store.PruneOlderThan(m.cfg.CleanupKeepDays)
+			if err != nil {
+				m.showStatus("prune failed: " + err.Error())
+				return m, nil
+			}
+			m.selected = map[string]bool{}
+			m.reloadCleanup()
+			m.showStatus(strings.Join([]string{"pruned", intStr(deleted), "candidates"}, " "))
+		}
+	case "n", "N", "esc", "q":
+		m.clearConfirm()
+		m.showStatus("cancelled")
+	}
+	return m, nil
 }
 
 func (m Model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -352,7 +412,15 @@ func (m Model) updateSetup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.ensureRootVisible()
 		}
 	case "i":
-		m.installLogger()
+		if m.installed {
+			m.showStatus("logger already installed in this project")
+			return m, nil
+		}
+		if m.language == nil {
+			m.showStatus("no supported project detected — install skipped")
+			return m, nil
+		}
+		m.askConfirm("install", "Install logger files into "+m.projectName+"? (optional)")
 	case "enter":
 		if m.focus == focusSetupRoots && len(m.cfg.Roots) > 0 {
 			return m, openEditorCmd(m.cfg.Roots[m.rootCursor])
@@ -417,41 +485,22 @@ func (m Model) updateCleanup(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.cleanup) == 0 {
 			return m, nil
 		}
-		_, err := logs.DeleteCandidates([]logs.CleanupCandidate{m.cleanup[m.cleanupCursor]})
-		if err != nil {
-			m.showStatus("delete failed: " + err.Error())
-			return m, nil
-		}
-		m.reloadCleanup()
-		m.showStatus("deleted candidate")
+		name := filepath.Base(m.cleanup[m.cleanupCursor].Path)
+		m.askConfirm("deleteOne", "Delete "+name+"?")
 	case "D":
-		var batch []logs.CleanupCandidate
+		count := 0
 		for _, candidate := range m.cleanup {
 			if m.selected[candidate.Path] {
-				batch = append(batch, candidate)
+				count++
 			}
 		}
-		if len(batch) == 0 {
+		if count == 0 {
 			m.showStatus("nothing selected")
 			return m, nil
 		}
-		deleted, err := logs.DeleteCandidates(batch)
-		if err != nil {
-			m.showStatus("delete failed: " + err.Error())
-			return m, nil
-		}
-		m.selected = map[string]bool{}
-		m.reloadCleanup()
-		m.showStatus(strings.Join([]string{"deleted", intStr(deleted), "candidates"}, " "))
+		m.askConfirm("deleteBatch", "Delete "+intStr(count)+" selected candidates?")
 	case "X":
-		deleted, err := m.store.PruneOlderThan(m.cfg.CleanupKeepDays)
-		if err != nil {
-			m.showStatus("prune failed: " + err.Error())
-			return m, nil
-		}
-		m.selected = map[string]bool{}
-		m.reloadCleanup()
-		m.showStatus(strings.Join([]string{"pruned", intStr(deleted), "candidates"}, " "))
+		m.askConfirm("prune", "Prune candidates older than "+intStr(m.cfg.CleanupKeepDays)+" days?")
 	case "o":
 		if len(m.cleanup) > 0 {
 			return m, openEditorCmd(m.cleanup[m.cleanupCursor].Path)

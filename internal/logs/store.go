@@ -121,8 +121,8 @@ func (s Store) DiscoverFiles() ([]FileInfo, error) {
 		files = append(files, file)
 	}
 	sort.Slice(files, func(i, j int) bool {
-		leftGroup := fileSortGroup(files[i])
-		rightGroup := fileSortGroup(files[j])
+		leftGroup := FileSortGroup(files[i])
+		rightGroup := FileSortGroup(files[j])
 		if leftGroup != rightGroup {
 			return leftGroup < rightGroup
 		}
@@ -134,7 +134,9 @@ func (s Store) DiscoverFiles() ([]FileInfo, error) {
 	return files, nil
 }
 
-func fileSortGroup(file FileInfo) string {
+// FileSortGroup returns a stable grouping key for a file — used both by discovery
+// to sort files together and by the TUI to decide when to print a group header.
+func FileSortGroup(file FileInfo) string {
 	return filepath.Clean(filepath.Join(file.Root, filepath.Dir(file.Path)))
 }
 
@@ -573,12 +575,12 @@ func (s Store) walkRoot(root string, filesByPath map[string]FileInfo) error {
 		}
 
 		if d.IsDir() {
-			if path != root && shouldIgnore(path, s.config.IgnorePatterns) {
+			if path != root && (isHidden(d.Name()) || shouldIgnore(path, s.config.IgnorePatterns)) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !d.Type().IsRegular() || shouldIgnore(path, s.config.IgnorePatterns) {
+		if !d.Type().IsRegular() || isHidden(d.Name()) || shouldIgnore(path, s.config.IgnorePatterns) {
 			return nil
 		}
 
@@ -630,7 +632,7 @@ func (s Store) findEmptyLogDirs() ([]CleanupCandidate, error) {
 			if !d.IsDir() {
 				return nil
 			}
-			if path != root && shouldIgnore(path, s.config.IgnorePatterns) {
+			if path != root && (isHidden(d.Name()) || shouldIgnore(path, s.config.IgnorePatterns)) {
 				return filepath.SkipDir
 			}
 			if samePath(path, root) {
@@ -733,35 +735,86 @@ func shouldIgnore(path string, patterns []string) bool {
 	return false
 }
 
+// isLogCandidate accepts a file only when the name actually signals a log:
+//   - name ends in .log (with optional trailing .N rotation or .gz compression)
+//   - name contains .log. (e.g. app.log.2024-01-01)
+//   - name has a "log" word token AND extension is in the allowlist or empty
+//   - path contains a /log/ or /logs/ component AND extension is in allowlist or empty
+//
+// Binary files are always rejected (except compressed, which we trust by name).
 func isLogCandidate(path string, extensions []string) bool {
 	base := strings.ToLower(filepath.Base(path))
-	ext := strings.ToLower(filepath.Ext(base))
-	explicitExt := false
-	for _, allowed := range extensions {
-		if ext == strings.ToLower(allowed) {
-			explicitExt = true
-			break
+	core := strings.TrimSuffix(base, ".gz")
+	core = stripRotationSuffix(core)
+	coreExt := strings.ToLower(filepath.Ext(core))
+
+	if coreExt == ".log" || strings.Contains(core, ".log.") {
+		if isCompressed(path) {
+			return true
 		}
+		return !hasBinaryContent(path)
 	}
 
-	if isRotated(path) || isCompressed(path) || strings.HasSuffix(base, ".out") || strings.HasSuffix(base, ".err") {
-		return true
-	}
-	if ext == ".log" {
-		return true
-	}
-
-	pathHint := hasLogPathHint(path)
-	if pathHint && explicitExt {
-		return true
-	}
-	if hasLogNameHint(base) {
-		return true
-	}
-	if !explicitExt {
+	extOK := coreExt == "" || hasAllowedExt(coreExt, extensions)
+	if !extOK {
 		return false
 	}
-	return contentLooksLikeLog(path)
+	if hasLogNameHint(core) || hasLogPathHint(path) {
+		if isCompressed(path) {
+			return true
+		}
+		return !hasBinaryContent(path)
+	}
+	return false
+}
+
+func hasAllowedExt(ext string, extensions []string) bool {
+	for _, allowed := range extensions {
+		if ext == strings.ToLower(allowed) {
+			return true
+		}
+	}
+	return false
+}
+
+func stripRotationSuffix(name string) string {
+	parts := strings.Split(name, ".")
+	if len(parts) < 2 {
+		return name
+	}
+	last := parts[len(parts)-1]
+	if _, err := strconv.Atoi(last); err == nil {
+		return strings.Join(parts[:len(parts)-1], ".")
+	}
+	return name
+}
+
+func isHidden(name string) bool {
+	return len(name) > 1 && name[0] == '.'
+}
+
+func hasBinaryContent(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 8192)
+	n, _ := f.Read(buf)
+	if n == 0 {
+		return false
+	}
+	buf = buf[:n]
+	nonText := 0
+	for _, b := range buf {
+		if b == 0 {
+			return true
+		}
+		if b < 32 && b != 9 && b != 10 && b != 13 {
+			nonText++
+		}
+	}
+	return float64(nonText)/float64(n) > 0.10
 }
 
 func hasLogPathHint(path string) bool {
@@ -787,57 +840,6 @@ func hasLogNameHint(base string) bool {
 		return true
 	}
 	return false
-}
-
-func contentLooksLikeLog(path string) bool {
-	f, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(io.LimitReader(f, 128*1024))
-	scanner.Buffer(make([]byte, 0, 8*1024), 128*1024)
-
-	nonEmpty := 0
-	loggy := 0
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		nonEmpty++
-		if lineLooksLikeLog(line) {
-			loggy++
-		}
-		if nonEmpty >= 12 {
-			break
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return false
-	}
-	if nonEmpty == 0 {
-		return false
-	}
-	if nonEmpty == 1 {
-		return loggy == 1
-	}
-	return loggy*2 >= nonEmpty
-}
-
-func lineLooksLikeLog(line string) bool {
-	if parsed, ok := parseJSONLine(line); ok {
-		return parsed.Timestamp != "" || parsed.Level != "" || parsed.Message != line
-	}
-	if parsed, ok := parseLogfmtLine(line); ok {
-		return parsed.Timestamp != "" || parsed.Level != "" || parsed.Message != line
-	}
-	ts, level, msg := extractPlainParts(line)
-	if ts != "" || level != "" {
-		return true
-	}
-	return msg != "" && msg != line && len(strings.Fields(line)) >= 3
 }
 
 func isCompressed(path string) bool {

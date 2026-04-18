@@ -31,6 +31,7 @@ const (
 	modeHelp
 	modeSearch
 	modeInput
+	modeConfirm
 )
 
 type focusSection int
@@ -79,6 +80,9 @@ type Model struct {
 
 	inputBuf   string
 	helpScroll int
+
+	confirmKind   string
+	confirmPrompt string
 
 	allFiles   []logs.FileInfo
 	files      []logs.FileInfo
@@ -418,16 +422,65 @@ func (m *Model) pageUp() {
 }
 
 func (m *Model) ensureFileVisible() {
-	visible := max(3, m.paneHeight()-4)
+	if len(m.files) == 0 {
+		m.fileScroll = 0
+		return
+	}
+	if m.fileCursor < 0 {
+		m.fileCursor = 0
+	}
+	if m.fileCursor >= len(m.files) {
+		m.fileCursor = len(m.files) - 1
+	}
 	if m.fileCursor < m.fileScroll {
 		m.fileScroll = m.fileCursor
 	}
-	if m.fileCursor >= m.fileScroll+visible {
-		m.fileScroll = m.fileCursor - visible + 1
+	rows := m.fileRowBudget()
+	for m.fileScroll <= m.fileCursor {
+		count := m.countFilesInWindow(m.fileScroll, rows)
+		if m.fileScroll+count > m.fileCursor {
+			break
+		}
+		m.fileScroll++
 	}
 	if m.fileScroll < 0 {
 		m.fileScroll = 0
 	}
+}
+
+// fileRowBudget is the number of content rows available for the file list,
+// inside the panel frame and below the "Logs (N)" header.
+func (m Model) fileRowBudget() int {
+	return max(1, m.paneHeight()-1)
+}
+
+// countFilesInWindow returns how many files starting at `scroll` can be rendered
+// within `rows` content rows, accounting for group-header overhead (a blank
+// separator + the group label on each group change).
+func (m Model) countFilesInWindow(scroll, rows int) int {
+	if rows < 1 || scroll >= len(m.files) {
+		return 0
+	}
+	lastGroup := ""
+	used := 0
+	count := 0
+	for i := scroll; i < len(m.files); i++ {
+		key := logs.FileSortGroup(m.files[i])
+		overhead := 0
+		if key != lastGroup {
+			overhead = 1
+			if lastGroup != "" {
+				overhead = 2
+			}
+		}
+		if used+overhead+1 > rows {
+			break
+		}
+		used += overhead + 1
+		count++
+		lastGroup = key
+	}
+	return count
 }
 
 func (m *Model) ensureEntryVisible() {
@@ -467,6 +520,18 @@ func (m *Model) ensureRootVisible() {
 	if m.rootScroll < 0 {
 		m.rootScroll = 0
 	}
+}
+
+func (m *Model) askConfirm(kind, prompt string) {
+	m.mode = modeConfirm
+	m.confirmKind = kind
+	m.confirmPrompt = prompt
+}
+
+func (m *Model) clearConfirm() {
+	m.mode = modeNormal
+	m.confirmKind = ""
+	m.confirmPrompt = ""
 }
 
 func (m *Model) showStatus(msg string) {

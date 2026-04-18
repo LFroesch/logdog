@@ -145,20 +145,34 @@ your-project/
 Generated logs are written as **JSON Lines** to:
 
 ```text
-~/.local/share/logdog/<project>/logs/<project>-YYYY-MM-DD.jsonl
+~/.local/share/logdog/<project>/logs/<name>-YYYY-MM-DD.jsonl
 ```
+
+The default logger writes to `default-YYYY-MM-DD.jsonl`. Each entry is stamped with `"logger":"<name>"` so you can also filter by field.
 
 Usage:
 
 ```go
 import "your-project/internal/logdog"
 
+// Default logger — writes to default-YYYY-MM-DD.jsonl
 func main() {
     logdog.Info("server started", "port", 8080)
     logdog.Warn("slow query", "sql", "select * from users")
     logdog.Error("request failed", "path", "/api/users", "status", 500)
 }
+
+// Named loggers — split by concern, written to <name>-YYYY-MM-DD.jsonl
+var (
+    authLog = logdog.New("auth")
+    dbLog   = logdog.New("db")
+)
+
+authLog.Info("login failed", "user_id", 123)
+dbLog.Error("query timeout", "table", "users")
 ```
+
+Options for named loggers: `logdog.WithDir("/some/path")` redirects a logger to a different folder, `logdog.WithLevel(logdog.DEBUG)` sets its minimum level.
 
 ## Workflow
 

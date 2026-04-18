@@ -149,20 +149,37 @@ logdog.Error("Error message")
 ### With Additional Data
 ` + "```go" + `
 // Pass key-value pairs as arguments
-logdog.Info("User action", 
+logdog.Info("User action",
    "user_id", 123,
    "action", "login",
    "ip", "192.168.1.1")
 ` + "```" + `
 
+### Named Loggers (split by concern)
+` + "```go" + `
+// Package-level named loggers write to their own file and are stamped with
+// ` + "`\"logger\":\"<name>\"`" + ` on every entry.
+var (
+   authLog = logdog.New("auth")
+   dbLog   = logdog.New("db")
+)
+
+authLog.Info("login failed", "user_id", 123)   // → auth-YYYY-MM-DD.jsonl
+dbLog.Error("query timeout", "table", "users") // → db-YYYY-MM-DD.jsonl
+logdog.Info("server started")                    // → default-YYYY-MM-DD.jsonl
+` + "```" + `
+
+Options: ` + "`logdog.WithDir(\"/some/path\")`" + ` sends a named logger to a different folder; ` + "`logdog.WithLevel(logdog.DEBUG)`" + ` sets its minimum level.
+
 ## Log Output
 
-Logs are written as JSON Lines to ` + "`~/.local/share/logdog/<project-name>/logs/<project-name>-YYYY-MM-DD.jsonl`" + ` by default:
+The default logger writes to ` + "`~/.local/share/logdog/<project-name>/logs/default-YYYY-MM-DD.jsonl`" + `. Named loggers sit alongside it (e.g. ` + "`auth-YYYY-MM-DD.jsonl`" + `). Every entry is JSON Lines:
 
 ` + "```json" + `
 {
- "timestamp": "2024-01-15 14:30:45",
+ "timestamp": "2024-01-15T14:30:45Z",
  "level": "INFO",
+ "logger": "default",
  "message": "User logged in",
  "data": {
    "user_id": 123,
@@ -185,7 +202,9 @@ your-project/
 ~/.local/share/logdog/
 └── your-project/
     └── logs/
-        └── your-project-2024-01-15.jsonl
+        ├── default-2024-01-15.jsonl
+        ├── auth-2024-01-15.jsonl
+        └── db-2024-01-15.jsonl
 ` + "```" + `
 
 ## Best Practices
@@ -271,48 +290,98 @@ const (
 type LogEntry struct {
 	Timestamp string                 ` + "`json:\"timestamp\"`" + `
 	Level     LogLevel               ` + "`json:\"level\"`" + `
+	Logger    string                 ` + "`json:\"logger\"`" + `
 	Message   string                 ` + "`json:\"message\"`" + `
 	Data      map[string]interface{} ` + "`json:\"data,omitempty\"`" + `
 }
 
 type Logger struct {
 	mu          sync.Mutex
+	name        string
 	logLevel    LogLevel
 	logDir      string
 	file        *os.File
 	currentDate string
 }
 
+// Option configures a Logger created with New.
+type Option func(*Logger)
+
+// WithDir overrides the directory a named logger writes to.
+// By default a named logger writes alongside the default logger.
+func WithDir(dir string) Option {
+	return func(l *Logger) { l.logDir = dir }
+}
+
+// WithLevel sets the minimum level for a named logger.
+func WithLevel(level LogLevel) Option {
+	return func(l *Logger) { l.logLevel = level }
+}
+
 var defaultLogger *Logger
 var once sync.Once
 
+func baseDir() string {
+	if dir := os.Getenv("LOGDOG_DIR"); dir != "" {
+		return dir
+	}
+	return "{{.Config.OutputDir}}"
+}
+
 func init() {
 	once.Do(func() {
-		dir := os.Getenv("LOGDOG_DIR")
-		if dir == "" {
-			dir = "{{.Config.OutputDir}}"
-		}
 		defaultLogger = &Logger{
+			name:     "default",
 			logLevel: INFO,
-			logDir:   dir,
+			logDir:   baseDir(),
 		}
 	})
 }
 
-// SetLevel sets the minimum log level. Messages below this level are dropped.
+// New returns a named logger that writes to ` + "`<name>-YYYY-MM-DD.jsonl`" + ` in the
+// same directory as the default logger. Each entry is stamped with the name
+// so downstream tooling can filter by logger.
+//
+//	var authLog = logdog.New("auth")
+//	authLog.Info("login failed", "user_id", id)
+func New(name string, opts ...Option) *Logger {
+	l := &Logger{
+		name:     name,
+		logLevel: INFO,
+		logDir:   baseDir(),
+	}
+	for _, opt := range opts {
+		opt(l)
+	}
+	return l
+}
+
+// SetLevel sets the minimum log level for the default logger.
 func SetLevel(level LogLevel) {
 	defaultLogger.mu.Lock()
 	defer defaultLogger.mu.Unlock()
 	defaultLogger.logLevel = level
 }
 
-// Close flushes and closes the open log file. Call on shutdown.
+// SetLevel sets the minimum log level for this named logger.
+func (l *Logger) SetLevel(level LogLevel) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.logLevel = level
+}
+
+// Close flushes and closes the default logger's open file. Call on shutdown.
 func Close() {
-	defaultLogger.mu.Lock()
-	defer defaultLogger.mu.Unlock()
-	if defaultLogger.file != nil {
-		defaultLogger.file.Close()
-		defaultLogger.file = nil
+	defaultLogger.Close()
+}
+
+// Close flushes and closes this named logger's open file.
+func (l *Logger) Close() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.file != nil {
+		l.file.Close()
+		l.file = nil
 	}
 }
 
@@ -338,8 +407,7 @@ func (l *Logger) rotate(today string) error {
 	if err := os.MkdirAll(l.logDir, 0755); err != nil {
 		return err
 	}
-	projectName := filepath.Base(filepath.Dir(l.logDir))
-	logPath := filepath.Join(l.logDir, fmt.Sprintf("%s-%s.jsonl", projectName, today))
+	logPath := filepath.Join(l.logDir, fmt.Sprintf("%s-%s.jsonl", l.name, today))
 	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -368,12 +436,19 @@ func (l *Logger) log(level LogLevel, message string, data map[string]interface{}
 	entry := LogEntry{
 		Timestamp: now.Format(time.RFC3339),
 		Level:     level,
+		Logger:    l.name,
 		Message:   message,
 		Data:      data,
 	}
 	jsonData, _ := json.Marshal(entry)
 	fmt.Fprintln(l.file, string(jsonData))
 }
+
+// Logging methods on a named Logger.
+func (l *Logger) Error(message string, args ...interface{}) { l.log(ERROR, message, buildData(args...)) }
+func (l *Logger) Warn(message string, args ...interface{})  { l.log(WARN, message, buildData(args...)) }
+func (l *Logger) Info(message string, args ...interface{})  { l.log(INFO, message, buildData(args...)) }
+func (l *Logger) Debug(message string, args ...interface{}) { l.log(DEBUG, message, buildData(args...)) }
 
 func buildData(args ...interface{}) map[string]interface{} {
 	if len(args) == 0 {
@@ -388,6 +463,7 @@ func buildData(args ...interface{}) map[string]interface{} {
 	return data
 }
 
+// Package-level helpers write to the default logger (name = "default").
 func Error(message string, args ...interface{}) { defaultLogger.log(ERROR, message, buildData(args...)) }
 func Warn(message string, args ...interface{})  { defaultLogger.log(WARN, message, buildData(args...)) }
 func Info(message string, args ...interface{})  { defaultLogger.log(INFO, message, buildData(args...)) }

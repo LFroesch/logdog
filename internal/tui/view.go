@@ -80,6 +80,8 @@ func (m Model) renderHeader() string {
 		right = "/ " + m.searchInput + "█"
 	case modeInput:
 		right = "add root: " + m.inputBuf + "█"
+	case modeConfirm:
+		right = m.confirmPrompt
 	}
 	return joinHeaderSides(left, dimStyle.Render(trim(right, max(12, m.width/2))), m.width)
 }
@@ -104,6 +106,10 @@ func (m Model) renderFooter() string {
 		add("enter", "add root")
 		add("esc", "cancel")
 		return strings.Join(parts, "")
+	case modeConfirm:
+		add("y", "confirm")
+		add("n/esc", "cancel")
+		return strings.Join(parts, "")
 	}
 
 	switch m.page {
@@ -124,7 +130,9 @@ func (m Model) renderFooter() string {
 		add("o", "open")
 		add("pgup/pgdn", "page")
 	case pageSetup:
-		add("i", "install")
+		if !m.installed {
+			add("i", "install")
+		}
 		add("n", "add root")
 		add("a/A", "add cwd/parent")
 		add("enter", "open root")
@@ -170,17 +178,19 @@ func (m Model) renderFilesPane(width int, active bool) string {
 		return renderPanel(panelStyleFor(active), width, m.paneHeight(), lines)
 	}
 
-	start, end := entryWindow(len(m.files), m.fileScroll, max(1, m.paneHeight()-2))
-	lastGroup := ""
+	count := m.countFilesInWindow(m.fileScroll, m.fileRowBudget())
+	start := m.fileScroll
+	end := start + count
+	lastKey := ""
 	for i := start; i < end; i++ {
 		file := m.files[i]
-		group := m.fileGroupLabel(file, width-6)
-		if group != lastGroup {
-			if lastGroup != "" {
+		key := logs.FileSortGroup(file)
+		if key != lastKey {
+			if lastKey != "" {
 				lines = append(lines, "")
 			}
-			lines = append(lines, dimStyle.Render(group+"/"))
-			lastGroup = group
+			lines = append(lines, dimStyle.Render(m.fileGroupLabel(file, width-6)+"/"))
+			lastKey = key
 		}
 		name := trim(filepath.Base(file.Path), max(12, width/2))
 		meta := dimStyle.Render(fmt.Sprintf("%s  %s", byteLabel(file.Size), file.ModTime.Format("01-02 15:04")))
@@ -267,11 +277,23 @@ func (m Model) renderSetupPane(width int) string {
 		labelStyle.Render("Default") + detailStyle.Render(trimMiddle(defaultRoot, width-10)),
 		"",
 		panelHeaderStyle.Render("Install"),
-		"Press " + keyStyle.Render("i") + " to install/update logger files for this project.",
+	}
+	switch {
+	case m.installed:
+		lines = append(lines, accentStyle.Render("Logger is installed in this project."))
+	case m.language == nil:
+		lines = append(lines, dimStyle.Render("No supported project detected here — install is not available."))
+	default:
+		lines = append(lines,
+			"Installing the generated logger is "+accentStyle.Render("optional")+" — logdog still discovers any logs it finds.",
+			"Press "+keyStyle.Render("i")+" to install logger files (you'll be asked to confirm).",
+		)
+	}
+	lines = append(lines,
 		"",
 		panelHeaderStyle.Render("Extra Roots"),
-		"Press " + keyStyle.Render("n") + " to add a custom directory root.",
-	}
+		"Press "+keyStyle.Render("n")+" to add a custom directory root.",
+	)
 	if len(m.cfg.Roots) == 0 {
 		lines = append(lines, "  "+dimStyle.Render("No extra roots configured"))
 	} else {
@@ -403,7 +425,7 @@ func (m Model) renderHelp() string {
 		"  ctrl+u / ctrl+d  page entry list",
 		"",
 		panelHeaderStyle.Render("Setup"),
-		"  i                install logger into current Go project",
+		"  i                install logger into current Go project (optional, y/n confirm)",
 		"  n                add a custom directory root (type path + enter)",
 		"  a / A            add project or parent directory to roots",
 		"  enter            open selected configured root",
@@ -423,9 +445,9 @@ func (m Model) renderHelp() string {
 		"",
 		panelHeaderStyle.Render("Cleanup"),
 		"  space            select candidate",
-		"  x                delete current candidate",
-		"  D                delete selected candidates",
-		"  X                prune by age",
+		"  x                delete current candidate (y/n confirm)",
+		"  D                delete selected candidates (y/n confirm)",
+		"  X                prune by age (y/n confirm)",
 		"",
 		panelHeaderStyle.Render("Navigation"),
 		"  g / G            top / bottom",
