@@ -1,5 +1,9 @@
 ## DevLog
 
+### 2026-04-30: Portable TUI test paths
+- Removed hardcoded `/home/lucas/...` paths from `internal/tui/model_test.go`
+- `TestRenderFilesPaneClampsGroupedRowsToPaneHeight` now uses `t.TempDir()` for `projectPath`, file paths, and roots so it passes on other machines and in CI
+
 ### 2026-04-18: Files pane scroll accounts for group headers
 - `ensureFileVisible` and `renderFilesPane` used mismatched budgets (`paneHeight-4` vs `paneHeight-2`) and neither counted the blank-separator + group-label rows between groups — with grouped lists the cursor could run off the bottom of the visible area
 - Added `countFilesInWindow` that simulates the render, charging 1 row per file plus 1–2 rows of group overhead on group changes; both scroll math and render use it and the same `fileRowBudget`

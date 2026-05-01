@@ -40,7 +40,11 @@ func init() {
 	once.Do(func() {
 		dir := os.Getenv("LOGDOG_DIR")
 		if dir == "" {
-			dir = "/home/lucas/.local/share/logdog/logdog/logs"
+			if home, err := os.UserHomeDir(); err == nil {
+				dir = filepath.Join(home, ".local", "share", "logdog", "logdog", "logs")
+			} else {
+				dir = filepath.Join(os.TempDir(), "logdog", "logs")
+			}
 		}
 		defaultLogger = &Logger{
 			logLevel: INFO,

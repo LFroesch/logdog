@@ -78,15 +78,16 @@ func TestEnsureEntryVisibleClampsNegativeScrollOnSmallScreens(t *testing.T) {
 }
 
 func TestRenderFilesPaneClampsGroupedRowsToPaneHeight(t *testing.T) {
+	projectPath := t.TempDir()
 	m := Model{
 		width:       120,
 		height:      18,
-		projectPath: "/home/lucas/projects/active/tui-suite/logdog",
+		projectPath: projectPath,
 	}
 	for i := 0; i < 20; i++ {
 		m.files = append(m.files, logs.FileInfo{
-			Path:       "/home/lucas/projects/active/tui-suite/logdog/group" + string(rune('A'+i)) + "/app.log",
-			Root:       "/home/lucas/projects/active/tui-suite/logdog",
+			Path:       projectPath + "/group" + string(rune('A'+i)) + "/app.log",
+			Root:       projectPath,
 			Format:     logs.FormatJSON,
 			Size:       1234,
 			EntryCount: 1,
