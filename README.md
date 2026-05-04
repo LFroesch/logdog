@@ -4,20 +4,28 @@ Logging control plane for `tui-suite`. `logdog` auto-discovers logs from the dir
 
 Built with Go, Cobra, and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 
-## Install
+## Quick Install
 
 Supported platforms: Linux and macOS. On Windows, use WSL.
 
-Recommended one-liner:
+Recommended (installs to `~/.local/bin`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LFroesch/logdog/main/install.sh | bash
 ```
 
-Install from Go:
+Or download a binary from [GitHub Releases](https://github.com/LFroesch/logdog/releases).
+
+Or install with Go:
 
 ```bash
 go install github.com/LFroesch/logdog@latest
+```
+
+Or build from source:
+
+```bash
+make install
 ```
 
 Verify:

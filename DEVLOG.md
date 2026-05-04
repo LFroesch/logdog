@@ -1,5 +1,11 @@
 ## DevLog
 
+### 2026-05-04: WORK audit for v1 blockers
+- Audited `WORK.md` against the current codebase and test suite to verify whether listed items were still active blockers
+- Confirmed the repo is in "no known v1 blockers" state and moved remaining real items to post-v1 polish/backlog
+- Verified `go test ./...` passes
+- Touched `WORK.md`
+
 ### 2026-04-30: Portable TUI test paths
 - Removed hardcoded `/home/lucas/...` paths from `internal/tui/model_test.go`
 - `TestRenderFilesPaneClampsGroupedRowsToPaneHeight` now uses `t.TempDir()` for `projectPath`, file paths, and roots so it passes on other machines and in CI
