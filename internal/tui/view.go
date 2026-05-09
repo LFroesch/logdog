@@ -161,7 +161,7 @@ func (m Model) renderFooter() string {
 }
 
 func (m Model) renderDashboard() string {
-	leftW, rightW := splitPaneWidths(m.width, 42, 40)
+	leftW, rightW := splitPaneWidths(m.width, 18, 18)
 	left := m.renderFilesPane(leftW, m.focus == focusFiles)
 	right := m.renderViewerPane(rightW, m.focus == focusViewer)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
@@ -242,7 +242,7 @@ func (m Model) renderViewerPane(width int, active bool) string {
 }
 
 func (m Model) renderSetupPage() string {
-	leftW, rightW := splitPaneWidths(m.width, 38, 40)
+	leftW, rightW := splitPaneWidths(m.width, 18, 18)
 	left := m.renderProjectPane(leftW)
 	right := m.renderSetupPane(rightW)
 	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)

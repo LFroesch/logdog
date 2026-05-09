@@ -100,3 +100,18 @@ func TestRenderFilesPaneClampsGroupedRowsToPaneHeight(t *testing.T) {
 		t.Fatalf("files pane height = %d, want %d", got, want)
 	}
 }
+
+func TestTrimPreservesAnsiSequences(t *testing.T) {
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color("1")).Render("abcdef")
+	got := trim(styled, 5)
+
+	if got == styled {
+		t.Fatalf("trim should shorten styled text when width exceeds max")
+	}
+	if width := lipgloss.Width(got); width != 5 {
+		t.Fatalf("trimmed width = %d, want 5", width)
+	}
+	if got[len(got)-4:] != "...\x1b[0m" && got[len(got)-3:] != "..." {
+		t.Fatalf("trimmed string should preserve ellipsis, got %q", got)
+	}
+}

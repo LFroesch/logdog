@@ -14,6 +14,7 @@ import (
 	"github.com/LFroesch/logdog/internal/logs"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type page int
@@ -640,8 +641,8 @@ func (m Model) contentHeight() int {
 		fixed++
 	}
 	height := m.height - fixed
-	if height < 6 {
-		return 6
+	if height < 3 {
+		return 3
 	}
 	return height
 }
@@ -804,8 +805,8 @@ func resolveClipboard() (string, []string, error) {
 func splitPaneWidths(total, leftMin, rightMin int) (int, int) {
 	frame := panelStyle.GetHorizontalFrameSize()
 	available := total - frame*4
-	if available < leftMin+rightMin {
-		available = leftMin + rightMin
+	if available < 2 {
+		available = 2
 	}
 	left := available / 3
 	if left < leftMin {
@@ -866,14 +867,10 @@ func entryWindow(total, scroll, height int) (int, int) {
 }
 
 func trim(s string, maxLen int) string {
-	if maxLen < 4 || lipgloss.Width(s) <= maxLen {
+	if maxLen < 4 || ansi.StringWidth(s) <= maxLen {
 		return s
 	}
-	r := []rune(s)
-	if len(r) <= maxLen {
-		return s
-	}
-	return string(r[:maxLen-3]) + "..."
+	return ansi.Truncate(s, maxLen, "...")
 }
 
 func trimMiddle(s string, maxLen int) string {
