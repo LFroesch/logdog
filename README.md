@@ -1,6 +1,8 @@
 # logdog
 
-Logging control plane for terminal projects. `logdog` can discover logs, inspect them in a TUI, follow them live, grep them from the CLI, and bootstrap a basic Go logger into a project.
+Logging control plane for terminal projects. `logdog` covers the everyday log workflow from one place: discover files, inspect them in a TUI, tail them live, grep them from the CLI, and bootstrap a basic Go logger when needed.
+
+![logdog hero screenshot](assets/screenshots/hero.png)
 
 ## Install
 
