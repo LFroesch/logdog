@@ -43,6 +43,7 @@ func newRootCmd() *cobra.Command {
 			if !isatty.IsTerminal(os.Stdin.Fd()) {
 				return streamEntries(os.Stdin, logs.Query{Level: levelFilter, Search: searchTerm})
 			}
+			tui.SetVersion(version)
 			p := tea.NewProgram(
 				tui.NewModel(resolveProjectPath()),
 				tea.WithAltScreen(),

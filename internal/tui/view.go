@@ -13,6 +13,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+var appVersion = "dev"
+
+func SetVersion(v string) {
+	if strings.TrimSpace(v) != "" {
+		appVersion = v
+	}
+}
+
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading..."
@@ -73,7 +81,7 @@ func (m Model) renderHeader() string {
 		}
 	}
 
-	left := titleStyle.Render("logdog") + "  " + strings.Join(renderedTabs, "")
+	left := titleStyle.Render("logdog") + " " + dimStyle.Render(appVersion) + "  " + strings.Join(renderedTabs, "")
 	right := m.headerStatusText()
 	switch m.mode {
 	case modeSearch:
