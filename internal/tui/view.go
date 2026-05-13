@@ -10,7 +10,7 @@ import (
 	"github.com/LFroesch/logdog/internal/config"
 	"github.com/LFroesch/logdog/internal/detector"
 	"github.com/LFroesch/logdog/internal/logs"
-	"github.com/LFroesch/tui-suite/suitechrome"
+	"github.com/LFroesch/logdog/suitechrome"
 	"github.com/charmbracelet/lipgloss"
 )
 
