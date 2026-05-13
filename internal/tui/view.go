@@ -10,6 +10,7 @@ import (
 	"github.com/LFroesch/logdog/internal/config"
 	"github.com/LFroesch/logdog/internal/detector"
 	"github.com/LFroesch/logdog/internal/logs"
+	"github.com/LFroesch/tui-suite/suitechrome"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -69,19 +70,12 @@ func (m Model) renderHeader() string {
 		{"Cleanup", pageCleanup},
 	}
 
-	var renderedTabs []string
+	var renderedTabs []suitechrome.Tab
 	for i, tab := range tabs {
-		if i > 0 {
-			renderedTabs = append(renderedTabs, dimStyle.Render(" │ "))
-		}
-		if tab.page == m.page {
-			renderedTabs = append(renderedTabs, activeTabStyle.Render(tab.name))
-		} else {
-			renderedTabs = append(renderedTabs, dimStyle.Render(tab.name))
-		}
+		renderedTabs = append(renderedTabs, suitechrome.Tab{Label: fmt.Sprintf("%d %s", i+1, tab.name), Active: tab.page == m.page})
 	}
 
-	left := titleStyle.Render("logdog") + " " + dimStyle.Render(appVersion) + "  " + strings.Join(renderedTabs, "")
+	left := suitechrome.RenderTitle("logdog", appVersion) + "  " + suitechrome.RenderTabs(renderedTabs)
 	right := m.headerStatusText()
 	switch m.mode {
 	case modeSearch:
@@ -91,16 +85,13 @@ func (m Model) renderHeader() string {
 	case modeConfirm:
 		right = m.confirmPrompt
 	}
-	return joinHeaderSides(left, dimStyle.Render(trim(right, max(12, m.width/2))), m.width)
+	return suitechrome.JoinHeader(m.width, left, dimStyle.Render(trim(right, max(12, m.width/2))))
 }
 
 func (m Model) renderFooter() string {
-	var parts []string
+	var actions []suitechrome.Action
 	add := func(key, action string) {
-		if len(parts) > 0 {
-			parts = append(parts, bulletStyle.Render(" · "))
-		}
-		parts = append(parts, keyStyle.Render(key), " ", actionStyle.Render(action))
+		actions = append(actions, suitechrome.Action{Key: key, Label: action})
 	}
 
 	switch m.mode {
@@ -108,16 +99,16 @@ func (m Model) renderFooter() string {
 		add("type", "search")
 		add("enter", "apply")
 		add("esc", "cancel")
-		return strings.Join(parts, "")
+		return suitechrome.RenderActions(actions)
 	case modeInput:
 		add("type", "path")
 		add("enter", "add root")
 		add("esc", "cancel")
-		return strings.Join(parts, "")
+		return suitechrome.RenderActions(actions)
 	case modeConfirm:
 		add("y", "confirm")
 		add("n/esc", "cancel")
-		return strings.Join(parts, "")
+		return suitechrome.RenderActions(actions)
 	}
 
 	switch m.page {
@@ -165,7 +156,7 @@ func (m Model) renderFooter() string {
 		add("q", "dashboard")
 	}
 
-	return strings.Join(parts, "")
+	return suitechrome.RenderActions(actions)
 }
 
 func (m Model) renderDashboard() string {
