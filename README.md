@@ -6,19 +6,29 @@ Logging control plane for terminal projects. `logdog` covers the everyday log wo
 
 **Live demo:** [froesch.dev](https://froesch.dev)
 
+## Release Status
+
+Developed for WSL2/Linux first. Cross-platform testing and bug fixing for macOS and native Windows are still in progress.
+
+Linux, WSL2, and macOS are the primary targets today. Windows binaries and installer entrypoints are available, but native Windows should still be treated as experimental.
+
 ## Install
 
-Supported platforms: Linux and macOS.
-
-Windows release binaries and installer entrypoints are shipped, but native Windows support is unverified.
-
-Recommended:
+Quick install:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LFroesch/logdog/main/install.sh | bash
 ```
 
-Windows:
+Experimental native Windows install:
+
+```powershell
+irm https://raw.githubusercontent.com/LFroesch/logdog/main/install.ps1 | iex
+```
+
+Direct installers: [`install.sh`](https://raw.githubusercontent.com/LFroesch/logdog/main/install.sh), [`install.ps1`](https://raw.githubusercontent.com/LFroesch/logdog/main/install.ps1)
+
+If you cloned the repo already:
 
 ```powershell
 ./install.ps1
